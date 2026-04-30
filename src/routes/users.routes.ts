@@ -16,17 +16,19 @@
 //   3. Export the router so index.ts can mount it
 // =============================================================
 
-import { Router } from "express";
+import { Router } from 'express';
 
 // Import each controller function by name.
 // These are the actual functions that contain the logic.
 import {
   getAllUsers,
+  getListingsByHost,
+  getBookingsByGuest,
   getUserById,
   createUser,
   updateUser,
   deleteUser,
-} from "../controllers/users.controller.js";
+} from '../controllers/users.controller.js';
 
 // Create a mini Express application that handles only /users routes.
 // This router will be "mounted" at /users inside index.ts,
@@ -47,11 +49,13 @@ const router = Router();
 // slash and makes it available as req.params.id in the controller.
 // ---------------------------------------------------------------
 
-router.get("/", getAllUsers);
-router.post("/", createUser);
-router.get("/:id", getUserById);
-router.put("/:id", updateUser);
-router.delete("/:id", deleteUser);
+router.get('/', getAllUsers);
+router.post('/', createUser);
+router.get('/:id', getUserById);
+router.get('/:id/listings', getListingsByHost);
+router.get('/:id/bookings', getBookingsByGuest);
+router.put('/:id', updateUser);
+router.delete('/:id', deleteUser);
 
 // Export the router so index.ts can register it.
 export default router;

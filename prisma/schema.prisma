@@ -1,0 +1,75 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id       Int    @id @default(autoincrement())
+  name     String
+  email    String @unique
+  username String @unique
+  phone    String
+  role     Role @default(GUEST)  
+  avatar   String?
+  bio      String?
+  createdAt  DateTime @default(now())
+  listings   Listing[] @relation("HostListings")
+  bookings  Booking[]
+}
+
+enum Role{
+HOST
+GUEST
+}
+
+model Listing {
+  id    Int    @id @default(autoincrement())
+  title String
+  description String
+  location String
+  pricePerNight Float
+  guests Int
+  type  ListingType
+  amenities String
+  rating Float?
+  createdAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  host User      @relation("HostListings", fields: [hostId], references: [id])
+  hostId Int 
+  bookings Booking[]
+}
+
+enum ListingType{
+  APARTMENT
+  HOUSE
+  VILLA
+  CABIN
+}
+
+model Booking {
+  id    Int    @id @default(autoincrement())
+  checkIn DateTime
+  checkout DateTime 
+  totalPrice Float
+  status BookingStatus @default(PENDING)
+  createdAt  DateTime @default(now())
+  guest User     @relation(fields: [guestId], references: [id])
+  guestId Int
+  listing Listing  @relation(fields: [listingId], references: [id])
+  listingId Int 
+}
+
+enum BookingStatus{
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
