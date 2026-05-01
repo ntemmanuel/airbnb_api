@@ -18,24 +18,33 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  username  String   @unique
-  phone     String
-  role      Role     @default(GUEST)
-  avatar    String?
-  createdAt DateTime @default(now())
+  id               Int       @id @default(autoincrement())
+  name             String
+  email            String    @unique
+  username         String    @unique
+  phone            String
+  
+  // NEW AUTH FIELDS
+  role             Role      @default(GUEST)
+  password         String    // This will store the bcrypt hash
+  
+  // NEW RESET FIELDS
+  resetToken       String?   // Hashed token for password resets
+  resetTokenExpiry DateTime? // Expiration time for reset requests
+  
+  avatar           String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt // Tracks last update time
 
-  // RELATIONS
-  // One-to-One: A user has one profile
-  profile   Profile? 
-  
-  // One-to-Many: A host has many listings
-  listings  Listing[] @relation("HostListings")
-  
-  // One-to-Many: A guest has many bookings
-  bookings  Booking[]
+  profile          Profile? 
+  listings         Listing[] @relation("HostListings")
+  bookings         Booking[]
+}
+
+enum Role {
+  ADMIN
+  HOST
+  GUEST
 }
 
 model Profile {
@@ -106,10 +115,6 @@ model Booking {
 }
 
 
-enum Role {
-  HOST
-  GUEST
-}
 
 enum ListingType {
   APARTMENT

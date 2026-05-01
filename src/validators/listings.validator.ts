@@ -8,7 +8,7 @@ export const createListingSchema = z.object({
   guests: z.number().int().min(1),
   type: z.enum(["APARTMENT", "HOUSE", "VILLA", "CABIN"]),
   // Add this line:
-  hostId: z.number().int().positive("A valid hostId is required"), 
+  // hostId: z.number().int().positive("A valid hostId is required"), 
   amenities: z.array(z.string()).min(1),
 });
 

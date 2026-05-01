@@ -6,10 +6,11 @@
 //   server-side price calculation and existence validation.
 // =============================================================
 
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import prisma from '../config/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { createBookingSchema } from "../validators/bookings.validator.js";
+import type { AuthRequest } from "../middlewares/auth.middleware.js";
 
 
 // Utility to handle Prisma errors consistently
@@ -98,52 +99,70 @@ export const getBookingById = async (req: Request, res: Response) => {
 };
 
 
-// ---------------------------------------------------------------
 // POST /bookings
-// Creates a booking. Validates dates, existence, and calculates price.
-// ---------------------------------------------------------------
-export const createBooking = async (req: Request, res: Response) => {
+export const createBooking = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const result = createBookingSchema.safeParse(req.body);
+    const { listingId, checkIn, checkOut } = req.body;
+    const guestId = req.userId!; // Derived from JWT, safe from tampering
 
-    if (!result.success) {
-  res.status(400).json({ 
-    message: "Validation failed",
-    errors: result.error.flatten().fieldErrors 
-  });
-  return;
-}
-
-
-    // Extraction from result.data (includes listingId, checkIn, checkOut)
-    const { listingId, checkIn, checkOut } = result.data;
-    const guestId = req.body.guestId; // guestId is still needed from body
-
-    const listing = await prisma.listing.findUnique({ where: { id: listingId } });
-    if (!listing) {
-      res.status(404).json({ message: "Listing not found" });
-      return;
+    // 1. Basic validation
+    if (!listingId || !checkIn || !checkOut) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Price calculation logic stays here, but dates are already valid!
     const start = new Date(checkIn);
     const end = new Date(checkOut);
-    const nights = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    const totalPrice = nights * listing.pricePerNight;
+    const now = new Date();
 
-    const newBooking = await prisma.booking.create({
-      data: {
+    // 2. Date Logic Validation
+    if (start >= end) {
+      return res.status(400).json({ error: "Check-in must be before check-out" });
+    }
+    if (start < now) {
+      return res.status(400).json({ error: "Check-in must be in the future" });
+    }
+
+    // 3. Verify Listing exists
+    const listing = await prisma.listing.findUnique({ where: { id: listingId } });
+    if (!listing) return res.status(404).json({ error: "Listing not found" });
+
+    // 4. CHECK FOR CONFLICTS (Prevent Double-Booking)
+    // Logic: Does any existing CONFIRMED booking overlap with these dates?
+    const conflict = await prisma.booking.findFirst({
+      where: {
         listingId,
+        status: "CONFIRMED",
+        AND: [
+          { checkIn: { lt: end } },  // Existing starts before new ends
+          { checkout: { gt: start } } // Existing ends after new starts
+        ]
+      }
+    });
+
+    if (conflict) {
+      return res.status(409).json({ error: "This listing is already booked for these dates" });
+    }
+
+    // 5. Calculate Price Server-Side
+    const diffInMs = end.getTime() - start.getTime();
+    const diffInDays = Math.ceil(diffInMs / (1000 * 60 * 60 * 24));
+    const totalPrice = diffInDays * listing.pricePerNight;
+
+    // 6. Create Booking
+    const booking = await prisma.booking.create({
+      data: {
         guestId,
+        listingId,
         checkIn: start,
         checkout: end,
         totalPrice,
-      },
+        status: "PENDING"
+      }
     });
 
-    res.status(201).json(newBooking);
+    res.status(201).json(booking);
   } catch (error) {
-    handleControllerError(res, error, "createBooking");
+    next(error);
   }
 };
 
@@ -172,26 +191,32 @@ export const updateBookingStatus = async (req: Request, res: Response) => {
   }
 };
 
-// ---------------------------------------------------------------
-// DELETE /bookings/:id
-// Removes a booking after checking if it exists.
-// ---------------------------------------------------------------
-export const deleteBooking = async (req: Request, res: Response) => {
+// DELETE /bookings/:id (Cancel)
+export const deleteBooking = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = parseInt(req.params["id"] as string);
+    const booking = await prisma.booking.findUnique({ where: { id } });
 
-    const existing = await prisma.booking.findFirst({ where: { id } });
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
 
-    if (!existing) {
-      res.status(404).json({ message: `Booking with id ${id} not found.` });
-      return;
+    // 1. Ownership Check: Only the guest who booked it (or ADMIN) can cancel
+    if (booking.guestId !== req.userId && req.role !== "ADMIN") {
+      return res.status(403).json({ error: "You can only cancel your own bookings" });
     }
 
-    await prisma.booking.delete({ where: { id } });
+    // 2. Prevent redundant cancellations
+    if (booking.status === "CANCELLED") {
+      return res.status(400).json({ error: "Booking is already cancelled" });
+    }
 
-    res.status(200).json({ message: 'Booking deleted successfully.' });
+    // 3. Soft Cancel: Update status rather than deleting for history/audits
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { status: "CANCELLED" }
+    });
+
+    res.json({ message: "Booking cancelled successfully", booking: updated });
   } catch (error) {
-    console.error('deleteBooking error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    next(error);
   }
 };

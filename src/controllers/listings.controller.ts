@@ -24,6 +24,7 @@ import type { NextFunction, Request, Response } from "express";
 import { createListingSchema, updateListingSchema } from "../validators/listings.validator.js"
 import prisma from '../config/prisma.js';
 import { handleControllerError } from '../controllers/bookings.controller.js';
+import type { AuthRequest } from "../middlewares/auth.middleware.js";
 
 
 // ---------------------------------------------------------------
@@ -124,20 +125,18 @@ export const getListingById = async (req: Request, res: Response) => {
   }
 };
 
-// ---------------------------------------------------------------
+
 // POST /listings
-// Creates a new listing. Verifies the host exists first.
-// ---------------------------------------------------------------
-export async function createListing(req: Request, res: Response, next: NextFunction) {
+export async function createListing(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    // .parse() throws an error that our Global Error Handler will catch
     const validatedData = createListingSchema.parse(req.body);
 
+    // SECURITY: We ignore any hostId sent in req.body and use the verified token ID
     const listing = await prisma.listing.create({
       data: {
         ...validatedData,
-        // Convert array ["Wifi", "Pool"] -> "Wifi, Pool" to match your DB String type
-        amenities: validatedData.amenities.join(", "), 
+        hostId: req.userId!, // Attached by authenticate middleware
+        amenities: validatedData.amenities.join(", "),
       },
     });
 
@@ -147,59 +146,49 @@ export async function createListing(req: Request, res: Response, next: NextFunct
   }
 }
 
-
-// ---------------------------------------------------------------
 // PUT /listings/:id
-// Updates a listing. Only the fields you send are changed.
-// ---------------------------------------------------------------
-export const updateListing = async (req: Request, res: Response) => {
+export async function updateListing(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params['id'] as string);
-    const result = updateListingSchema.safeParse(req.body);
+    const id = parseInt(req.params["id"] as string);
+    const listing = await prisma.listing.findUnique({ where: { id } });
 
-    if (!result.success) {
-      res.status(400).json({
-        message: 'Validation failed',
-        errors: result.error.flatten().fieldErrors,
-      });
-      return;
+    if (!listing) return res.status(404).json({ error: "Listing not found" });
+
+    // OWNERSHIP CHECK: Only the host or an ADMIN can update
+    if (listing.hostId !== req.userId && req.role !== "ADMIN") {
+      return res.status(403).json({ error: "You can only edit your own listings" });
     }
 
     const updated = await prisma.listing.update({
       where: { id },
-      data: req.body,
+      data: req.body, // Use Zod validation here as we did in previous steps
     });
 
-    res.status(200).json(updated);
+    res.json(updated);
   } catch (error) {
-    handleControllerError(res, error, 'updateListing');
+    next(error);
   }
-};
+}
 
-// ---------------------------------------------------------------
 // DELETE /listings/:id
-// Removes a listing. Its bookings are deleted via Cascade.
-// ---------------------------------------------------------------
-export const deleteListing = async (req: Request, res: Response) => {
+export async function deleteListing(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = parseInt(req.params["id"] as string);
+    const listing = await prisma.listing.findUnique({ where: { id } });
 
-    const existing = await prisma.listing.findFirst({ where: { id } });
-    if (!existing) {
-      res.status(404).json({ message: `Listing with id ${id} not found.` });
-      return;
+    if (!listing) return res.status(404).json({ error: "Listing not found" });
+
+    // OWNERSHIP CHECK: Only the host or an ADMIN can delete
+    if (listing.hostId !== req.userId && req.role !== "ADMIN") {
+      return res.status(403).json({ error: "You can only delete your own listings" });
     }
 
     await prisma.listing.delete({ where: { id } });
-
-    res
-      .status(200)
-      .json({ message: `Listing with id ${id} deleted successfully.` });
+    res.json({ message: "Listing deleted successfully" });
   } catch (error) {
-    console.error('deleteListing error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    next(error);
   }
-};
+}
 
 // ---------------------------------------------------------------
 // GET /users/:id/listings

@@ -13,21 +13,22 @@
 // =============================================================
 
 // 1. LOAD ENVIRONMENT VARIABLES FIRST
-// This must be the absolute first thing that happens so all 
+// This must be the absolute first thing that happens so all
 // following code can access variables from your .env file.
-import "dotenv/config";
+import 'dotenv/config';
 
-import express from "express";
-import type { Request, Response } from "express";
+import express from 'express';
+import type { Request, Response } from 'express';
 
 // Import the two routers we built.
-import usersRouter from "./routes/users.routes.js";
+import usersRouter from './routes/users.routes.js';
 import listingsRouter from './routes/listings.routes.js';
-import bookingRouter from './routes/bookings.routes.js'
-import { errorHandler } from "./middlewares/errorHandler.js";
+import bookingRouter from './routes/bookings.routes.js';
+import { errorHandler } from './middlewares/errorHandler.js';
+import authRouter from './routes/auth.routes.js';
 
 // Import the database connection utility (assumed path)
-import { connectDB } from "./config/prisma.js";
+import { connectDB } from './config/prisma.js';
 
 const app = express();
 
@@ -37,7 +38,9 @@ app.use(express.json());
 // 3. MOUNT ROUTERS
 app.use('/users', usersRouter);
 app.use('/listings', listingsRouter);
-app.use('/bookings', bookingRouter)
+app.use('/bookings', bookingRouter);
+// This makes sure POST /register becomes POST /auth/register
+app.use('/auth', authRouter);
 app.use(errorHandler);
 
 // 4. CATCH-ALL 404 HANDLER
@@ -54,19 +57,19 @@ async function main() {
   try {
     // Await the database connection
     await connectDB();
-    console.log("✅ Database connected successfully");
+    console.log('✅ Database connected successfully');
 
     // Get PORT from environment or use 3000 as a backup
-    const PORT = process.env["PORT"] || 3000;
+    const PORT = process.env['PORT'] || 3000;
 
     app.listen(PORT, () => {
       console.log(`✅ Server is running at http://localhost:${PORT}`);
       console.log(`   Users    → http://localhost:${PORT}/users`);
-      console.log(`   Listings → http://localhost:${PORT}/listings`)
+      console.log(`   Listings → http://localhost:${PORT}/listings`);
       console.log(`   Bookings → http://localhost:${PORT}/bookings`);
     });
   } catch (error) {
-    console.error("❌ Failed to start server:", error);
+    console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 }
