@@ -29,6 +29,11 @@ import {
   updateUser,
   deleteUser,
 } from '../controllers/users.controller.js';
+import {
+  getProfile,
+  createProfile,
+  updateProfile,
+} from '../controllers/profiles.controller.js';
 
 // Create a mini Express application that handles only /users routes.
 // This router will be "mounted" at /users inside index.ts,
@@ -54,6 +59,9 @@ router.post('/', createUser);
 router.get('/:id', getUserById);
 router.get('/:id/listings', getListingsByHost);
 router.get('/:id/bookings', getBookingsByGuest);
+router.get('/:id/profile', getProfile);
+router.post('/:id/profile', createProfile);
+router.put('/:id/profile', updateProfile);
 router.put('/:id', updateUser);
 router.delete('/:id', deleteUser);
 

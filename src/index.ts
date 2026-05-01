@@ -24,6 +24,7 @@ import type { Request, Response } from "express";
 import usersRouter from "./routes/users.routes.js";
 import listingsRouter from './routes/listings.routes.js';
 import bookingRouter from './routes/bookings.routes.js'
+import { errorHandler } from "./middlewares/errorHandler.js";
 
 // Import the database connection utility (assumed path)
 import { connectDB } from "./config/prisma.js";
@@ -37,6 +38,7 @@ app.use(express.json());
 app.use('/users', usersRouter);
 app.use('/listings', listingsRouter);
 app.use('/bookings', bookingRouter)
+app.use(errorHandler);
 
 // 4. CATCH-ALL 404 HANDLER
 app.use((req: Request, res: Response) => {

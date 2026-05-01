@@ -23,21 +23,18 @@
 //   approach for Node.js + PostgreSQL.
 // =============================================================
 
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../generated/prisma/client.js';
+import { PrismaClient } from '../generated/prisma/index.js';
+import { PrismaPg } from "@prisma/adapter-pg";
+import pg from "pg";
+import "dotenv/config";
 
-// ---------------------------------------------------------------
-// 1. CREATE THE PRISMA CLIENT
-// ---------------------------------------------------------------
-// PrismaPg reads DATABASE_URL from process.env to know which
-// PostgreSQL database to connect to.
-//
-// We create ONE prisma instance and reuse it everywhere.
-// Creating multiple instances wastes database connections.
-// ---------------------------------------------------------------
-const adapter = new PrismaPg({ connectionString: process.env['DATABASE_URL'] });
+const connectionString = process.env["DATABASE_URL"];
+
+const pool = new pg.Pool({ connectionString });
+const adapter = new PrismaPg(pool);
 
 const prisma = new PrismaClient({ adapter });
+
 
 // ---------------------------------------------------------------
 // 2. connectDB — opens the database connection

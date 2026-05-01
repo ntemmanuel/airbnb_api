@@ -1,74 +1,124 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// =============================================================
+// FILE: prisma/schema.prisma
+// -------------------------------------------------------------
+// UPDATES: 
+//   - Added Profile model (One-to-One with User)
+//   - Added ListingPhoto model (One-to-Many with Listing)
+//   - Applied onDelete: Cascade to all relations for data integrity
+// =============================================================
 
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
+
 }
 
 model User {
-  id       Int    @id @default(autoincrement())
-  name     String
-  email    String @unique
-  username String @unique
-  phone    String
-  role     Role @default(GUEST)  
-  avatar   String?
-  bio      String?
-  createdAt  DateTime @default(now())
-  listings   Listing[] @relation("HostListings")
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  username  String   @unique
+  phone     String
+  role      Role     @default(GUEST)
+  avatar    String?
+  createdAt DateTime @default(now())
+
+  // RELATIONS
+  // One-to-One: A user has one profile
+  profile   Profile? 
+  
+  // One-to-Many: A host has many listings
+  listings  Listing[] @relation("HostListings")
+  
+  // One-to-Many: A guest has many bookings
   bookings  Booking[]
 }
 
-enum Role{
-HOST
-GUEST
+model Profile {
+  id      Int     @id @default(autoincrement())
+  bio     String?
+  website String?
+  country String?
+
+  // One-to-One Relation
+  // The @unique on userId is what makes this 1:1 instead of 1:Many
+  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  Int  @unique 
 }
 
 model Listing {
-  id    Int    @id @default(autoincrement())
-  title String
-  description String
-  location String
+  id            Int           @id @default(autoincrement())
+  title         String
+  description   String
+  location      String
   pricePerNight Float
-  guests Int
-  type  ListingType
-  amenities String
-  rating Float?
-  createdAt  DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  host User      @relation("HostListings", fields: [hostId], references: [id])
-  hostId Int 
-  bookings Booking[]
+  guests        Int
+  type          ListingType
+  amenities     String
+  rating        Float?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // RELATIONS
+  // When a Host (User) is deleted, delete all their listings
+  host      User           @relation("HostListings", fields: [hostId], references: [id], onDelete: Cascade)
+  hostId    Int
+  
+  // One-to-Many: A listing has many photos
+  photos    ListingPhoto[]
+  
+  // One-to-Many: A listing has many bookings
+  bookings  Booking[]
 }
 
-enum ListingType{
+model ListingPhoto {
+  id        Int     @id @default(autoincrement())
+  url       String
+  altText   String?
+
+  // When a Listing is deleted, delete all its photos
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  listingId Int
+}
+
+model Booking {
+  id         Int           @id @default(autoincrement())
+  checkIn    DateTime
+  checkout   DateTime
+  totalPrice Float
+  status     BookingStatus @default(PENDING)
+  createdAt  DateTime      @default(now())
+
+  // RELATIONS
+  // Changed to Restrict: You cannot delete a User if they have bookings.
+  // This prevents losing financial/history records accidentally.
+  guest     User    @relation(fields: [guestId], references: [id], onDelete: Restrict)
+  guestId   Int
+  
+  // Changed to Restrict: You cannot delete a Listing if it has bookings.
+  // This forces the host to manage/cancel reservations before removing the property.
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  listingId Int
+}
+
+
+enum Role {
+  HOST
+  GUEST
+}
+
+enum ListingType {
   APARTMENT
   HOUSE
   VILLA
   CABIN
 }
 
-model Booking {
-  id    Int    @id @default(autoincrement())
-  checkIn DateTime
-  checkout DateTime 
-  totalPrice Float
-  status BookingStatus @default(PENDING)
-  createdAt  DateTime @default(now())
-  guest User     @relation(fields: [guestId], references: [id])
-  guestId Int
-  listing Listing  @relation(fields: [listingId], references: [id])
-  listingId Int 
-}
-
-enum BookingStatus{
+enum BookingStatus {
   PENDING
   CONFIRMED
   CANCELLED

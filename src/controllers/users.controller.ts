@@ -1,4 +1,4 @@
- // =============================================================
+// =============================================================
 // FILE: src/controllers/users.controller.ts
 // -------------------------------------------------------------
 // RESPONSIBILITY: All business logic for the Users resource.
@@ -24,9 +24,15 @@
 //   include      → JOINs related data (like JOIN in SQL)
 // =============================================================
 
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { Prisma } from '../generated/prisma/client.js';
 import prisma from '../config/prisma.js';
+import {
+  createUserSchema,
+  updateUserSchema,
+} from '../validators/users.validator.js';
+import { handleControllerError } from '../controllers/bookings.controller.js';
+
 
 // ---------------------------------------------------------------
 // GET /users
@@ -57,39 +63,33 @@ export const getAllUsers = async (req: Request, res: Response) => {
 // Returns a single user AND includes all their listings + bookings.
 // Useful for a "profile page" view.
 // ---------------------------------------------------------------
-export const getUserById = async (req: Request, res: Response) => {
+// GET /users/:id
+export const getUserById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = parseInt(req.params["id"] as string);
 
     const user = await prisma.user.findUnique({
       where: { id },
-      // "include" tells Prisma to also fetch related data in one query.
-      // Behind the scenes Prisma runs a JOIN — no extra roundtrips needed.
       include: {
-        listings: true,
-        bookings: {
-          include: {
-            listing: {
-              // For bookings, only include the listing title and location
-              // — we don't need the full listing object.
-              select: { title: true, location: true },
-            },
-          },
+        profile: true,
+        // Instead of separate queries, use Prisma's conditional include logic:
+        listings: {
+          include: { _count: { select: { bookings: true } } }
         },
-      },
+        bookings: {
+          include: { listing: { select: { title: true, location: true } } }
+        }
+      }
     });
 
-    if (!user) {
-      res.status(404).json({ message: `User with id ${id} not found.` });
-      return;
-    }
+    if (!user) return res.status(404).json({ message: "User not found" });
 
     res.status(200).json(user);
   } catch (error) {
-    console.error('getUserById error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    next(error); // This sends the raw error to your terminal for debugging
   }
 };
+
 
 // GET /users/:id/listings
 export const getListingsByHost = async (req: Request, res: Response) => {
@@ -114,39 +114,23 @@ export const getBookingsByGuest = async (req: Request, res: Response) => {
 // ---------------------------------------------------------------
 export const createUser = async (req: Request, res: Response) => {
   try {
-    const { name, email, username, phone, role, avatar, bio } = req.body;
+    const result = createUserSchema.safeParse(req.body);
 
-    // Guard clause: check all required fields are present.
-    if (!name || !email || !username || !phone || !role) {
+    if (!result.success) {
       res.status(400).json({
-        message: 'Missing required fields: name, email, username, phone, role.',
+        message: 'Validation failed',
+        errors: result.error.flatten().fieldErrors,
       });
       return;
     }
 
     const newUser = await prisma.user.create({
-      // "data" is the object Prisma will INSERT into the database.
-      data: { name, email, username, phone, role, avatar, bio },
+      data: result.data,
     });
 
     res.status(201).json(newUser);
   } catch (error) {
-    // PRISMA ERROR HANDLING
-    // Prisma throws specific error codes for database constraint violations.
-    // We check for them here to give the client a meaningful message.
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      // P2002 = "Unique constraint failed" — duplicate email or username.
-      if (error.code === 'P2002') {
-        res
-          .status(409)
-          .json({
-            message: 'A user with that email or username already exists.',
-          });
-        return;
-      }
-    }
-    console.error('createUser error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    handleControllerError(res, error, 'createUser');
   }
 };
 
@@ -157,33 +141,24 @@ export const createUser = async (req: Request, res: Response) => {
 export const updateUser = async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params['id'] as string);
+    const result = updateUserSchema.safeParse(req.body);
 
-    // findFirst() checks if the user exists BEFORE trying to update.
-    // If we skip this and call update() directly on a missing id,
-    // Prisma throws a P2025 error which we'd need to catch anyway —
-    // doing it explicitly makes the code clearer.
-    const existing = await prisma.user.findFirst({ where: { id } });
-
-    if (!existing) {
-      res.status(404).json({ message: `User with id ${id} not found.` });
+    if (!result.success) {
+      res.status(400).json({
+        message: 'Validation failed',
+        errors: result.error.flatten().fieldErrors,
+      });
       return;
     }
 
     const updated = await prisma.user.update({
       where: { id },
-      data: req.body, // Prisma only updates the fields included in req.body
+      data: req.body,
     });
 
     res.status(200).json(updated);
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2002') {
-        res.status(409).json({ message: 'Email or username already in use.' });
-        return;
-      }
-    }
-    console.error('updateUser error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    handleControllerError(res, error, 'updateUser');
   }
 };
 

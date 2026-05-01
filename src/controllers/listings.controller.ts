@@ -20,9 +20,11 @@
 //   - "contains" with "mode: insensitive" = case-insensitive LIKE
 // =============================================================
 
-import type { Request, Response } from 'express';
-import { Prisma, ListingType } from '../generated/prisma/client.js';
+import type { NextFunction, Request, Response } from "express";
+import { createListingSchema, updateListingSchema } from "../validators/listings.validator.js"
 import prisma from '../config/prisma.js';
+import { handleControllerError } from '../controllers/bookings.controller.js';
+
 
 // ---------------------------------------------------------------
 // GET /listings
@@ -43,7 +45,9 @@ export const getAllListings = async (req: Request, res: Response) => {
     const skip = (page - 1) * limit;
 
     if (page < 1 || limit < 1) {
-      res.status(400).json({ message: "Page and limit must be positive integers." });
+      res
+        .status(400)
+        .json({ message: 'Page and limit must be positive integers.' });
       return;
     }
 
@@ -54,7 +58,7 @@ export const getAllListings = async (req: Request, res: Response) => {
 
     // 2. Only add keys if they are defined
     if (location) {
-      where.location = { contains: String(location), mode: "insensitive" };
+      where.location = { contains: String(location), mode: 'insensitive' };
     }
 
     if (type) {
@@ -69,16 +73,24 @@ export const getAllListings = async (req: Request, res: Response) => {
     const listings = await prisma.listing.findMany({
       skip,
       take: limit,
-      where, 
+      where,
+      include: {
+        // 1. Only get specific host info to keep response light
+        host: {
+          select: { name: true, avatar: true },
+        },
+        // 2. Count bookings without loading the actual booking objects
+        _count: {
+          select: { bookings: true },
+        },
+      },
     });
 
     res.status(200).json(listings);
   } catch (error) {
-    console.error("getAllListings error:", error);
-    res.status(500).json({ message: "Something went wrong." });
+    handleControllerError(res, error, 'getAllListings');
   }
 };
-
 
 // ---------------------------------------------------------------
 // GET /listings/:id
@@ -116,75 +128,25 @@ export const getListingById = async (req: Request, res: Response) => {
 // POST /listings
 // Creates a new listing. Verifies the host exists first.
 // ---------------------------------------------------------------
-export const createListing = async (req: Request, res: Response) => {
+export async function createListing(req: Request, res: Response, next: NextFunction) {
   try {
-    const {
-      title,
-      description,
-      location,
-      pricePerNight,
-      guests,
-      type,
-      amenities,
-      rating,
-      hostId,
-    } = req.body;
+    // .parse() throws an error that our Global Error Handler will catch
+    const validatedData = createListingSchema.parse(req.body);
 
-    if (
-      !title ||
-      !description ||
-      !location ||
-      !pricePerNight ||
-      !guests ||
-      !type ||
-      !amenities ||
-      !hostId
-    ) {
-      res.status(400).json({
-        message:
-          'Missing required fields: title, description, location, pricePerNight, guests, type, amenities, hostId.',
-      });
-      return;
-    }
-
-    // Verify the host actually exists before creating the listing.
-    // Without this check Prisma would throw a foreign key error (P2003)
-    // which we could catch — but checking first gives a clearer message.
-    const hostExists = await prisma.user.findFirst({ where: { id: hostId } });
-    if (!hostExists) {
-      res.status(404).json({ message: `Host with id ${hostId} not found.` });
-      return;
-    }
-
-    const newListing = await prisma.listing.create({
+    const listing = await prisma.listing.create({
       data: {
-        title,
-        description,
-        location,
-        pricePerNight,
-        guests,
-        type,
-        amenities,
-        rating,
-        hostId,
+        ...validatedData,
+        // Convert array ["Wifi", "Pool"] -> "Wifi, Pool" to match your DB String type
+        amenities: validatedData.amenities.join(", "), 
       },
     });
 
-    res.status(201).json(newListing);
+    res.status(201).json(listing);
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      // P2003 = foreign key constraint — hostId points to a non-existent user.
-      if (error.code === 'P2003') {
-        res
-          .status(400)
-          .json({ message: 'Invalid hostId — that user does not exist.' });
-        return;
-      }
-    }
-    console.error('createListing error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    next(error);
   }
-};
+}
+
 
 // ---------------------------------------------------------------
 // PUT /listings/:id
@@ -193,10 +155,13 @@ export const createListing = async (req: Request, res: Response) => {
 export const updateListing = async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params['id'] as string);
+    const result = updateListingSchema.safeParse(req.body);
 
-    const existing = await prisma.listing.findFirst({ where: { id } });
-    if (!existing) {
-      res.status(404).json({ message: `Listing with id ${id} not found.` });
+    if (!result.success) {
+      res.status(400).json({
+        message: 'Validation failed',
+        errors: result.error.flatten().fieldErrors,
+      });
       return;
     }
 
@@ -207,8 +172,7 @@ export const updateListing = async (req: Request, res: Response) => {
 
     res.status(200).json(updated);
   } catch (error) {
-    console.error('updateListing error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    handleControllerError(res, error, 'updateListing');
   }
 };
 

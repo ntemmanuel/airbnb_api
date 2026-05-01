@@ -8,6 +8,48 @@
 
 import type { Request, Response } from 'express';
 import prisma from '../config/prisma.js';
+import { Prisma } from '../generated/prisma/client.js';
+import { createBookingSchema } from "../validators/bookings.validator.js";
+
+
+// Utility to handle Prisma errors consistently
+export const handleControllerError = (
+  res: Response,
+  error: unknown,
+  operation: string,
+) => {
+  // 1. Log the error server-side for debugging
+  console.error(`❌ [${operation}] Failed:`, {
+    code:
+      error instanceof Prisma.PrismaClientKnownRequestError
+        ? error.code
+        : 'N/A',
+    message: error instanceof Error ? error.message : error,
+  });
+
+  // 2. Check for specific Prisma errors
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    switch (error.code) {
+      case 'P2002': // Unique constraint (e.g., duplicate email)
+        return res
+          .status(409)
+          .json({ message: 'A record with that unique field already exists.' });
+      case 'P2025': // Record not found
+        return res
+          .status(404)
+          .json({ message: 'The requested record was not found.' });
+      case 'P2003': // Foreign key constraint (e.g., invalid hostId)
+        return res.status(400).json({
+          message:
+            'Cannot delete this record because it is being used by other data (e.g., active bookings).',
+        });
+    }
+  }
+
+  // 3. Fallback for all other errors
+  return res.status(500).json({ message: 'Something went wrong.' });
+};
+
 
 // ---------------------------------------------------------------
 // GET /bookings
@@ -34,27 +76,27 @@ export const getAllBookings = async (req: Request, res: Response) => {
 // ---------------------------------------------------------------
 export const getBookingById = async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = parseInt(req.params["id"] as string);
 
     const booking = await prisma.booking.findUnique({
       where: { id },
       include: {
-        guest: true,
-        listing: true,
-      },
+        guest: true, // Full guest profile
+        listing: {
+          include: {
+            host: { select: { name: true } } // Show host name of the property
+          }
+        }
+      }
     });
 
-    if (!booking) {
-      res.status(404).json({ message: `Booking with id ${id} not found.` });
-      return;
-    }
-
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
     res.status(200).json(booking);
   } catch (error) {
-    console.error('getBookingById error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    handleControllerError(res, error, "getBookingById");
   }
 };
+
 
 // ---------------------------------------------------------------
 // POST /bookings
@@ -62,58 +104,46 @@ export const getBookingById = async (req: Request, res: Response) => {
 // ---------------------------------------------------------------
 export const createBooking = async (req: Request, res: Response) => {
   try {
-    const { guestId, listingId, checkIn, checkOut } = req.body;
+    const result = createBookingSchema.safeParse(req.body);
 
-    // 1. Validate required fields
-    if (!guestId || !listingId || !checkIn || !checkOut) {
-      res.status(400).json({ message: 'Missing required fields.' });
-      return;
-    }
+    if (!result.success) {
+  res.status(400).json({ 
+    message: "Validation failed",
+    errors: result.error.flatten().fieldErrors 
+  });
+  return;
+}
 
-    // 2. Verify Guest and Listing exist
-    const [guest, listing] = await Promise.all([
-      prisma.user.findUnique({ where: { id: guestId } }),
-      prisma.listing.findUnique({ where: { id: listingId } }),
-    ]);
 
-    if (!guest) {
-      res.status(404).json({ message: 'Guest not found.' });
-      return;
-    }
+    // Extraction from result.data (includes listingId, checkIn, checkOut)
+    const { listingId, checkIn, checkOut } = result.data;
+    const guestId = req.body.guestId; // guestId is still needed from body
+
+    const listing = await prisma.listing.findUnique({ where: { id: listingId } });
     if (!listing) {
-      res.status(404).json({ message: 'Listing not found.' });
+      res.status(404).json({ message: "Listing not found" });
       return;
     }
 
-    // 3. Calculate totalPrice server-side
+    // Price calculation logic stays here, but dates are already valid!
     const start = new Date(checkIn);
     const end = new Date(checkOut);
-    const diffInMs = end.getTime() - start.getTime();
-    const diffInDays = Math.ceil(diffInMs / (1000 * 60 * 60 * 24));
+    const nights = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const totalPrice = nights * listing.pricePerNight;
 
-    if (diffInDays <= 0) {
-      res.status(400).json({ message: 'Check-out must be after check-in.' });
-      return;
-    }
-
-    const totalPrice = diffInDays * listing.pricePerNight;
-
-    // 4. Create the booking
     const newBooking = await prisma.booking.create({
       data: {
-        guestId,
         listingId,
+        guestId,
         checkIn: start,
         checkout: end,
         totalPrice,
-        status: 'PENDING',
       },
     });
 
     res.status(201).json(newBooking);
   } catch (error) {
-    console.error('createBooking error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
+    handleControllerError(res, error, "createBooking");
   }
 };
 
