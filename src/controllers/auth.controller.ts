@@ -11,6 +11,8 @@ import bcrypt from 'bcrypt';
 import * as jwt from 'jsonwebtoken';
 import prisma from '../config/prisma.js';
 import type { AuthRequest } from '../middlewares/auth.middleware.js';
+import { sendEmail } from '../config/email.js';
+import { welcomeEmail, passwordResetEmail } from '../templates/emails.js';
 
 /**
  * POST /auth/register
@@ -73,9 +75,26 @@ export async function register(
     // 7. Remove password from the response object
     const { password: _, ...userWithoutPassword } = user;
 
+    // 1. SEND RESPONSE IMMEDIATELY
+    // We want the user to see "Success" right away without waiting for the SMTP server
     res.status(201).json(userWithoutPassword);
+
+    // 2. FIRE WELCOME EMAIL IN BACKGROUND
+    // We wrap this in a separate try/catch so an email failure
+    // doesn't trigger the global error handler after the response is sent.
+    try {
+      await sendEmail(
+        user.email,
+        'Welcome to Airbnb!',
+        welcomeEmail(user.name, user.role),
+      );
+      console.log(`✅ Welcome email sent to ${user.email}`);
+    } catch (emailError) {
+      // Log the error for the dev, but the user is already registered successfully
+      console.error('❌ Failed to send welcome email:', emailError);
+    }
   } catch (error) {
-    next(error); // Pass to global error handler
+    next(error);
   }
 }
 
@@ -236,7 +255,7 @@ export async function changePassword(
 
 /**
  * POST /auth/forgot-password
- * Initiates the reset process without leaking user existence.
+ * Sends a secure reset link to the user's email if they exist.
  */
 export async function forgotPassword(
   req: Request,
@@ -245,29 +264,25 @@ export async function forgotPassword(
 ) {
   try {
     const { email } = req.body;
-
-    // 1. Always give the same response to prevent email harvesting
     const successMessage =
       'If that email is registered, a reset link has been sent.';
 
+    // 1. Find user
     const user = await prisma.user.findUnique({ where: { email } });
+
+    // 2. Return early if no user, but keep message same for security
     if (!user) {
       return res.status(200).json({ message: successMessage });
     }
 
-    // 2. Generate a secure raw token to send to the user
+    // 3. Generate and Hash Token (Logic from Part 7)
     const rawToken = crypto.randomBytes(32).toString('hex');
-
-    // 3. Hash the token for database storage (Safety: DB theft won't leak tokens)
     const hashedToken = crypto
       .createHash('sha256')
       .update(rawToken)
       .digest('hex');
+    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-    // 4. Set expiry to 1 hour from now
-    const expiry = new Date(Date.now() + 60 * 60 * 1000);
-
-    // 5. Update user record
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -276,13 +291,23 @@ export async function forgotPassword(
       },
     });
 
-    // 6. Log the link (Since we don't have an email provider set up yet)
-    console.log(`\n📧 RESET EMAIL SENT TO: ${email}`);
-    console.log(
-      `🔗 Link: http://localhost:3000/auth/reset-password/${rawToken}\n`,
-    );
+    // 4. Construct the Reset URL
+    const resetUrl = `http://localhost:3000/auth/reset-password/${rawToken}`;
 
+    // 5. Send Response Immediately
     res.status(200).json({ message: successMessage });
+
+    // 6. Fire Reset Email in Background
+    try {
+      await sendEmail(
+        user.email,
+        'Password Reset Request',
+        passwordResetEmail(user.name, resetUrl),
+      );
+      console.log(`✅ Reset email delivered to ${user.email}`);
+    } catch (emailError) {
+      console.error('❌ Failed to send password reset email:', emailError);
+    }
   } catch (error) {
     next(error);
   }

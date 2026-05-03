@@ -33,6 +33,7 @@ model User {
   resetTokenExpiry DateTime? // Expiration time for reset requests
   
   avatar           String?
+  avatarPublicId   String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt // Tracks last update time
 
@@ -84,12 +85,16 @@ model Listing {
   bookings  Booking[]
 }
 
+// -------------------------------------------------------------
+// UPDATES: Added publicId to ListingPhoto to allow 
+//   individual photo deletion from Cloudinary.
+// =============================================================
+
 model ListingPhoto {
   id        Int     @id @default(autoincrement())
-  url       String
-  altText   String?
-
-  // When a Listing is deleted, delete all its photos
+  url       String  // Cloudinary HTTPS URL
+  publicId  String  // Cloudinary unique ID (needed for deletion)
+  
   listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
   listingId Int
 }

@@ -26,14 +26,23 @@ import listingsRouter from './routes/listings.routes.js';
 import bookingRouter from './routes/bookings.routes.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 import authRouter from './routes/auth.routes.js';
+import { setupSwagger } from './config/swagger.js';
 
 // Import the database connection utility (assumed path)
 import { connectDB } from './config/prisma.js';
+
+import uploadRouter from './routes/upload.routes.js';
 
 const app = express();
 
 // 2. GLOBAL MIDDLEWARE
 app.use(express.json());
+
+// Initialize Swagger Documentation
+setupSwagger(app);
+
+// ... route definitions
+app.use('/auth', authRouter);
 
 // 3. MOUNT ROUTERS
 app.use('/users', usersRouter);
@@ -42,6 +51,8 @@ app.use('/bookings', bookingRouter);
 // This makes sure POST /register becomes POST /auth/register
 app.use('/auth', authRouter);
 app.use(errorHandler);
+// Mount the upload routes under the /users path
+app.use('/users', uploadRouter);
 
 // 4. CATCH-ALL 404 HANDLER
 app.use((req: Request, res: Response) => {

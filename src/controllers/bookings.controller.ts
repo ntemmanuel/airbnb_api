@@ -9,9 +9,13 @@
 import type { Request, Response, NextFunction } from 'express';
 import prisma from '../config/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
-import { createBookingSchema } from "../validators/bookings.validator.js";
-import type { AuthRequest } from "../middlewares/auth.middleware.js";
-
+import { createBookingSchema } from '../validators/bookings.validator.js';
+import type { AuthRequest } from '../middlewares/auth.middleware.js';
+import { sendEmail } from '../config/email.js';
+import {
+  bookingConfirmationEmail,
+  bookingCancellationEmail,
+} from '../templates/emails.js';
 
 // Utility to handle Prisma errors consistently
 export const handleControllerError = (
@@ -51,7 +55,6 @@ export const handleControllerError = (
   return res.status(500).json({ message: 'Something went wrong.' });
 };
 
-
 // ---------------------------------------------------------------
 // GET /bookings
 // Returns all bookings with guest name and listing title.
@@ -77,7 +80,7 @@ export const getAllBookings = async (req: Request, res: Response) => {
 // ---------------------------------------------------------------
 export const getBookingById = async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params["id"] as string);
+    const id = parseInt(req.params['id'] as string);
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -85,29 +88,32 @@ export const getBookingById = async (req: Request, res: Response) => {
         guest: true, // Full guest profile
         listing: {
           include: {
-            host: { select: { name: true } } // Show host name of the property
-          }
-        }
-      }
+            host: { select: { name: true } }, // Show host name of the property
+          },
+        },
+      },
     });
 
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
     res.status(200).json(booking);
   } catch (error) {
-    handleControllerError(res, error, "getBookingById");
+    handleControllerError(res, error, 'getBookingById');
   }
 };
 
-
 // POST /bookings
-export const createBooking = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const createBooking = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     const { listingId, checkIn, checkOut } = req.body;
     const guestId = req.userId!; // Derived from JWT, safe from tampering
 
     // 1. Basic validation
     if (!listingId || !checkIn || !checkOut) {
-      return res.status(400).json({ error: "Missing required fields" });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
     const start = new Date(checkIn);
@@ -116,31 +122,37 @@ export const createBooking = async (req: AuthRequest, res: Response, next: NextF
 
     // 2. Date Logic Validation
     if (start >= end) {
-      return res.status(400).json({ error: "Check-in must be before check-out" });
+      return res
+        .status(400)
+        .json({ error: 'Check-in must be before check-out' });
     }
     if (start < now) {
-      return res.status(400).json({ error: "Check-in must be in the future" });
+      return res.status(400).json({ error: 'Check-in must be in the future' });
     }
 
     // 3. Verify Listing exists
-    const listing = await prisma.listing.findUnique({ where: { id: listingId } });
-    if (!listing) return res.status(404).json({ error: "Listing not found" });
+    const listing = await prisma.listing.findUnique({
+      where: { id: listingId },
+    });
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
 
     // 4. CHECK FOR CONFLICTS (Prevent Double-Booking)
     // Logic: Does any existing CONFIRMED booking overlap with these dates?
     const conflict = await prisma.booking.findFirst({
       where: {
         listingId,
-        status: "CONFIRMED",
+        status: 'CONFIRMED',
         AND: [
-          { checkIn: { lt: end } },  // Existing starts before new ends
-          { checkout: { gt: start } } // Existing ends after new starts
-        ]
-      }
+          { checkIn: { lt: end } }, // Existing starts before new ends
+          { checkout: { gt: start } }, // Existing ends after new starts
+        ],
+      },
     });
 
     if (conflict) {
-      return res.status(409).json({ error: "This listing is already booked for these dates" });
+      return res
+        .status(409)
+        .json({ error: 'This listing is already booked for these dates' });
     }
 
     // 5. Calculate Price Server-Side
@@ -155,12 +167,36 @@ export const createBooking = async (req: AuthRequest, res: Response, next: NextF
         listingId,
         checkIn: start,
         checkout: end,
-        totalPrice,
-        status: "PENDING"
-      }
+        totalPrice: 400,
+        status: 'PENDING',
+      },
+      include: {
+        guest: { select: { email: true, name: true } },
+        listing: { select: { title: true, location: true } },
+      },
     });
 
     res.status(201).json(booking);
+    // 1. Send Confirmation Email (Async/Background)
+    try {
+      const checkInStr = new Date(booking.checkIn).toLocaleDateString();
+      const checkOutStr = new Date(booking.checkout).toLocaleDateString();
+
+      await sendEmail(
+        booking.guest.email,
+        'Booking Confirmed!',
+        bookingConfirmationEmail(
+          booking.guest.name,
+          booking.listing.title,
+          booking.listing.location,
+          checkInStr,
+          checkOutStr,
+          booking.totalPrice,
+        ),
+      );
+    } catch (emailErr) {
+      console.error('Failed to send booking confirmation email:', emailErr);
+    }
   } catch (error) {
     next(error);
   }
@@ -192,30 +228,53 @@ export const updateBookingStatus = async (req: Request, res: Response) => {
 };
 
 // DELETE /bookings/:id (Cancel)
-export const deleteBooking = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const deleteBooking = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
-    const id = parseInt(req.params["id"] as string);
-    const booking = await prisma.booking.findUnique({ where: { id } });
+    const id = parseInt(req.params['id'] as string);
 
-    if (!booking) return res.status(404).json({ error: "Booking not found" });
-
-    // 1. Ownership Check: Only the guest who booked it (or ADMIN) can cancel
-    if (booking.guestId !== req.userId && req.role !== "ADMIN") {
-      return res.status(403).json({ error: "You can only cancel your own bookings" });
-    }
-
-    // 2. Prevent redundant cancellations
-    if (booking.status === "CANCELLED") {
-      return res.status(400).json({ error: "Booking is already cancelled" });
-    }
-
-    // 3. Soft Cancel: Update status rather than deleting for history/audits
-    const updated = await prisma.booking.update({
+    // Find booking with relations for email data
+    const booking = await prisma.booking.findUnique({
       where: { id },
-      data: { status: "CANCELLED" }
+      include: {
+        guest: { select: { name: true, email: true } },
+        listing: { select: { title: true } },
+      },
     });
 
-    res.json({ message: "Booking cancelled successfully", booking: updated });
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (booking.guestId !== req.userId && req.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { status: 'CANCELLED' },
+    });
+
+    res.json({ message: 'Booking cancelled successfully' });
+
+    // 2. Send Cancellation Email (Async/Background)
+    try {
+      const checkInStr = new Date(booking.checkIn).toLocaleDateString();
+      const checkOutStr = new Date(booking.checkout).toLocaleDateString();
+
+      await sendEmail(
+        booking.guest.email,
+        'Booking Cancelled',
+        bookingCancellationEmail(
+          booking.guest.name,
+          booking.listing.title,
+          checkInStr,
+          checkOutStr,
+        ),
+      );
+    } catch (emailErr) {
+      console.error('Failed to send cancellation email:', emailErr);
+    }
   } catch (error) {
     next(error);
   }
