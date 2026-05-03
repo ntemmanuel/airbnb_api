@@ -136,66 +136,52 @@ export const createBooking = async (
     });
     if (!listing) return res.status(404).json({ error: 'Listing not found' });
 
-    // 4. CHECK FOR CONFLICTS (Prevent Double-Booking)
-    // Logic: Does any existing CONFIRMED booking overlap with these dates?
-    const conflict = await prisma.booking.findFirst({
-      where: {
-        listingId,
-        status: 'CONFIRMED',
-        AND: [
-          { checkIn: { lt: end } }, // Existing starts before new ends
-          { checkout: { gt: start } }, // Existing ends after new starts
-        ],
-      },
-    });
-
-    if (conflict) {
-      return res
-        .status(409)
-        .json({ error: 'This listing is already booked for these dates' });
-    }
-
-    // 5. Calculate Price Server-Side
-    const diffInMs = end.getTime() - start.getTime();
-    const diffInDays = Math.ceil(diffInMs / (1000 * 60 * 60 * 24));
+    const diffInDays = Math.ceil(
+      (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+    );
     const totalPrice = diffInDays * listing.pricePerNight;
 
-    // 6. Create Booking
-    const booking = await prisma.booking.create({
-      data: {
-        guestId,
-        listingId,
-        checkIn: start,
-        checkout: end,
-        totalPrice: 400,
-        status: 'PENDING',
-      },
-      include: {
-        guest: { select: { email: true, name: true } },
-        listing: { select: { title: true, location: true } },
-      },
-    });
-
-    res.status(201).json(booking);
-    // 1. Send Confirmation Email (Async/Background)
+    // 3. ATOMIC TRANSACTION
+    // We use 'tx' (the transaction client) for all DB calls inside this block
     try {
-      const checkInStr = new Date(booking.checkIn).toLocaleDateString();
-      const checkOutStr = new Date(booking.checkout).toLocaleDateString();
+      const booking = await prisma.$transaction(async (tx) => {
+        // A. Check for conflicts inside the transaction
+        const conflict = await tx.booking.findFirst({
+          where: {
+            listingId,
+            status: 'CONFIRMED',
+            checkIn: { lt: end },
+            checkout: { gt: start },
+          },
+        });
 
-      await sendEmail(
-        booking.guest.email,
-        'Booking Confirmed!',
-        bookingConfirmationEmail(
-          booking.guest.name,
-          booking.listing.title,
-          booking.listing.location,
-          checkInStr,
-          checkOutStr,
-          booking.totalPrice,
-        ),
-      );
-    } catch (emailErr) {
-      console.error('Failed to send booking confirmation email:', emailErr);
+        if (conflict) {
+          // We throw a specific error string to catch it later
+          throw new Error('BOOKING_CONFLICT');
+        }
+
+        // B. Create the booking if no conflict
+        return await tx.booking.create({
+          data: {
+            listingId,
+            guestId: guestId!,
+            checkIn: start,
+            checkout: end,
+            totalPrice,
+            status: 'PENDING',
+          },
+        });
+      });
+
+      res.status(201).json(booking);
+    } catch (txError: any) {
+      // 4. Handle the specific conflict error
+      if (txError.message === 'BOOKING_CONFLICT') {
+        return res
+          .status(409)
+          .json({ error: 'This listing is already booked for these dates.' });
+      }
+      throw txError; // Pass other DB errors to the outer catch
     }
   } catch (error) {
     next(error);

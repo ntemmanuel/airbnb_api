@@ -25,6 +25,7 @@ import {
   createListing,
   updateListing,
   deleteListing,
+  getListingStatsByLocation
 } from '../controllers/listings.controller.js';
 
 const router = Router();
@@ -87,6 +88,8 @@ const router = Router();
  */
 // Public routes
 router.get('/', getAllListings);
+
+router.get("/stats", getListingStatsByLocation);
 
 /**
  * @swagger

@@ -20,12 +20,14 @@
 //   - "contains" with "mode: insensitive" = case-insensitive LIKE
 // =============================================================
 
-import type { NextFunction, Request, Response } from "express";
-import { createListingSchema, updateListingSchema } from "../validators/listings.validator.js"
+import type { NextFunction, Request, Response } from 'express';
+import {
+  createListingSchema,
+  updateListingSchema,
+} from '../validators/listings.validator.js';
 import prisma from '../config/prisma.js';
 import { handleControllerError } from '../controllers/bookings.controller.js';
-import type { AuthRequest } from "../middlewares/auth.middleware.js";
-
+import type { AuthRequest } from '../middlewares/auth.middleware.js';
 
 // ---------------------------------------------------------------
 // GET /listings
@@ -125,9 +127,39 @@ export const getListingById = async (req: Request, res: Response) => {
   }
 };
 
+// GET /listings/stats
+export const getListingStatsByLocation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    // We use $queryRaw for complex grouping and rounding
+    // Note: Table names in Prisma/Postgres are usually lowercase unless quoted
+    const stats = await prisma.$queryRaw`
+      SELECT 
+        location, 
+        COUNT(*)::int AS total, 
+        ROUND(AVG("pricePerNight")::numeric, 2) AS avg_price,
+        MIN("pricePerNight") AS min_price,
+        MAX("pricePerNight") AS max_price
+      FROM "Listing"
+      GROUP BY location
+      ORDER BY total DESC
+    `;
+
+    res.status(200).json(stats);
+  } catch (error) {
+    next(error);
+  }
+};
 
 // POST /listings
-export async function createListing(req: AuthRequest, res: Response, next: NextFunction) {
+export async function createListing(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
   try {
     const validatedData = createListingSchema.parse(req.body);
 
@@ -136,7 +168,7 @@ export async function createListing(req: AuthRequest, res: Response, next: NextF
       data: {
         ...validatedData,
         hostId: req.userId!, // Attached by authenticate middleware
-        amenities: validatedData.amenities.join(", "),
+        amenities: validatedData.amenities.join(', '),
       },
     });
 
@@ -147,16 +179,22 @@ export async function createListing(req: AuthRequest, res: Response, next: NextF
 }
 
 // PUT /listings/:id
-export async function updateListing(req: AuthRequest, res: Response, next: NextFunction) {
+export async function updateListing(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
   try {
-    const id = parseInt(req.params["id"] as string);
+    const id = parseInt(req.params['id'] as string);
     const listing = await prisma.listing.findUnique({ where: { id } });
 
-    if (!listing) return res.status(404).json({ error: "Listing not found" });
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
 
     // OWNERSHIP CHECK: Only the host or an ADMIN can update
-    if (listing.hostId !== req.userId && req.role !== "ADMIN") {
-      return res.status(403).json({ error: "You can only edit your own listings" });
+    if (listing.hostId !== req.userId && req.role !== 'ADMIN') {
+      return res
+        .status(403)
+        .json({ error: 'You can only edit your own listings' });
     }
 
     const updated = await prisma.listing.update({
@@ -171,20 +209,26 @@ export async function updateListing(req: AuthRequest, res: Response, next: NextF
 }
 
 // DELETE /listings/:id
-export async function deleteListing(req: AuthRequest, res: Response, next: NextFunction) {
+export async function deleteListing(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
   try {
-    const id = parseInt(req.params["id"] as string);
+    const id = parseInt(req.params['id'] as string);
     const listing = await prisma.listing.findUnique({ where: { id } });
 
-    if (!listing) return res.status(404).json({ error: "Listing not found" });
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
 
     // OWNERSHIP CHECK: Only the host or an ADMIN can delete
-    if (listing.hostId !== req.userId && req.role !== "ADMIN") {
-      return res.status(403).json({ error: "You can only delete your own listings" });
+    if (listing.hostId !== req.userId && req.role !== 'ADMIN') {
+      return res
+        .status(403)
+        .json({ error: 'You can only delete your own listings' });
     }
 
     await prisma.listing.delete({ where: { id } });
-    res.json({ message: "Listing deleted successfully" });
+    res.json({ message: 'Listing deleted successfully' });
   } catch (error) {
     next(error);
   }
