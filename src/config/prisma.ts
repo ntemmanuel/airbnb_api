@@ -24,17 +24,20 @@
 // =============================================================
 
 import { PrismaClient } from '../generated/prisma/index.js';
-import { PrismaPg } from "@prisma/adapter-pg";
-import pg from "pg";
-import "dotenv/config";
+import { PrismaPg } from '@prisma/adapter-pg';
+import pg from 'pg';
+import 'dotenv/config';
 
-const connectionString = process.env["DATABASE_URL"];
+// Configuration for the "Waiting Room" of database connections
+const pool = new pg.Pool({
+  connectionString: process.env['DATABASE_URL'],
+  max: 10, // Only 10 people in the "waiting room" at once
+  idleTimeoutMillis: 30000, // Close connection after 30s of no use
+  connectionTimeoutMillis: 2000, // Give up if it takes > 2s to connect
+});
 
-const pool = new pg.Pool({ connectionString });
 const adapter = new PrismaPg(pool);
-
 const prisma = new PrismaClient({ adapter });
-
 
 // ---------------------------------------------------------------
 // 2. connectDB — opens the database connection

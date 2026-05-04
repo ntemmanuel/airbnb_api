@@ -1,12 +1,3 @@
-// =============================================================
-// FILE: prisma/schema.prisma
-// -------------------------------------------------------------
-// UPDATES: 
-//   - Added Profile model (One-to-One with User)
-//   - Added ListingPhoto model (One-to-Many with Listing)
-//   - Applied onDelete: Cascade to all relations for data integrity
-// =============================================================
-
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/prisma"
@@ -14,32 +5,30 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
+  // url      = env("DATABASE_URL")
 }
 
 model User {
-  id               Int       @id @default(autoincrement())
+  id               Int            @id @default(autoincrement())
   name             String
-  email            String    @unique
-  username         String    @unique
+  email            String         @unique
+  username         String         @unique
   phone            String
-  
-  // NEW AUTH FIELDS
-  role             Role      @default(GUEST)
-  password         String    // This will store the bcrypt hash
-  
-  // NEW RESET FIELDS
-  resetToken       String?   // Hashed token for password resets
-  resetTokenExpiry DateTime? // Expiration time for reset requests
-  
+  role             Role           @default(GUEST)
+  password         String
+  resetToken       String?
+  resetTokenExpiry DateTime?
   avatar           String?
   avatarPublicId   String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt // Tracks last update time
-
-  profile          Profile? 
-  listings         Listing[] @relation("HostListings")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  profile          Profile?
+  listings         Listing[]      @relation("HostListings")
   bookings         Booking[]
+  reviews          Review[]
+
+  @@index([name])
+  @@index([role])
 }
 
 enum Role {
@@ -53,15 +42,12 @@ model Profile {
   bio     String?
   website String?
   country String?
-
-  // One-to-One Relation
-  // The @unique on userId is what makes this 1:1 instead of 1:Many
-  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId  Int  @unique 
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  Int     @unique
 }
 
 model Listing {
-  id            Int           @id @default(autoincrement())
+  id            Int            @id @default(autoincrement())
   title         String
   description   String
   location      String
@@ -70,31 +56,27 @@ model Listing {
   type          ListingType
   amenities     String
   rating        Float?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  // FIXED: Removed duplicate 'user' relation. Using 'host' consistently.
+  host          User           @relation("HostListings", fields: [hostId], references: [id], onDelete: Cascade)
+  hostId        Int
+  
+  photos        ListingPhoto[]
+  bookings      Booking[]
+  reviews       Review[]
 
-  // RELATIONS
-  // When a Host (User) is deleted, delete all their listings
-  host      User           @relation("HostListings", fields: [hostId], references: [id], onDelete: Cascade)
-  hostId    Int
-  
-  // One-to-Many: A listing has many photos
-  photos    ListingPhoto[]
-  
-  // One-to-Many: A listing has many bookings
-  bookings  Booking[]
+  @@index([hostId])
+  @@index([location])
+  @@index([type])
+  @@index([pricePerNight])
 }
-
-// -------------------------------------------------------------
-// UPDATES: Added publicId to ListingPhoto to allow 
-//   individual photo deletion from Cloudinary.
-// =============================================================
 
 model ListingPhoto {
   id        Int     @id @default(autoincrement())
-  url       String  // Cloudinary HTTPS URL
-  publicId  String  // Cloudinary unique ID (needed for deletion)
-  
+  url       String
+  publicId  String
   listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
   listingId Int
 }
@@ -102,24 +84,35 @@ model ListingPhoto {
 model Booking {
   id         Int           @id @default(autoincrement())
   checkIn    DateTime
-  checkout   DateTime
+  // FIXED: Using camelCase 'checkOut' to match your validators
+  checkOut   DateTime
   totalPrice Float
-  status     BookingStatus @default(PENDING)
+  status     BookingStatus @default(CONFIRMED)
   createdAt  DateTime      @default(now())
 
   // RELATIONS
-  // Changed to Restrict: You cannot delete a User if they have bookings.
-  // This prevents losing financial/history records accidentally.
-  guest     User    @relation(fields: [guestId], references: [id], onDelete: Restrict)
-  guestId   Int
-  
-  // Changed to Restrict: You cannot delete a Listing if it has bookings.
-  // This forces the host to manage/cancel reservations before removing the property.
-  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Restrict)
-  listingId Int
+  guest      User          @relation(fields: [guestId], references: [id], onDelete: Restrict)
+  guestId    Int
+  listing    Listing       @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  listingId  Int
+
+  @@index([guestId])
+  @@index([listingId])
 }
 
+model Review {
+  id        Int      @id @default(autoincrement())
+  rating    Int
+  comment   String
+  userId    Int
+  listingId Int
+  user      User     @relation(fields: [userId], references: [id])
+  listing   Listing  @relation(fields: [listingId], references: [id])
+  createdAt DateTime @default(now())
 
+  @@index([userId])
+  @@index([listingId])
+}
 
 enum ListingType {
   APARTMENT

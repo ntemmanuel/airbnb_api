@@ -16,10 +16,8 @@
 // This must be the absolute first thing that happens so all
 // following code can access variables from your .env file.
 import 'dotenv/config';
-
 import express from 'express';
 import type { Request, Response } from 'express';
-
 // Import the two routers we built.
 import usersRouter from './routes/users.routes.js';
 import listingsRouter from './routes/listings.routes.js';
@@ -27,13 +25,17 @@ import bookingRouter from './routes/bookings.routes.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 import authRouter from './routes/auth.routes.js';
 import { setupSwagger } from './config/swagger.js';
-
 // Import the database connection utility (assumed path)
 import { connectDB } from './config/prisma.js';
 
 import uploadRouter from './routes/upload.routes.js';
+import { generalLimiter, strictLimiter } from './middlewares/rateLimiter.js';
+import compression from "compression";
 
 const app = express();
+
+app.use(compression());
+app.use(express.json());
 
 // 2. GLOBAL MIDDLEWARE
 app.use(express.json());
@@ -41,15 +43,18 @@ app.use(express.json());
 // Initialize Swagger Documentation
 setupSwagger(app);
 
+// Apply general limiter to EVERY request
+app.use(generalLimiter);
+
 // ... route definitions
-app.use('/auth', authRouter);
+app.use('/auth', strictLimiter, authRouter);
 
 // 3. MOUNT ROUTERS
 app.use('/users', usersRouter);
 app.use('/listings', listingsRouter);
-app.use('/bookings', bookingRouter);
+app.use('/bookings', strictLimiter, bookingRouter);
 // This makes sure POST /register becomes POST /auth/register
-app.use('/auth', authRouter);
+app.use('/auth', strictLimiter, authRouter);
 app.use(errorHandler);
 // Mount the upload routes under the /users path
 app.use('/users', uploadRouter);

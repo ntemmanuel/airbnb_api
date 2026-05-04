@@ -25,7 +25,8 @@ import {
   createListing,
   updateListing,
   deleteListing,
-  getListingStatsByLocation
+  searchListings,
+  getListingStatsByLocation,
 } from '../controllers/listings.controller.js';
 
 const router = Router();
@@ -89,7 +90,90 @@ const router = Router();
 // Public routes
 router.get('/', getAllListings);
 
-router.get("/stats", getListingStatsByLocation);
+/**
+ * @swagger
+ * /listings/search:
+ *   get:
+ *     summary: Search and filter listings
+ *     description: Retrieve a paginated list of listings based on location, type, price range, and guest capacity. Uses database indexes for high performance.
+ *     tags: [Listings]
+ *     parameters:
+ *       - in: query
+ *         name: location
+ *         schema:
+ *           type: string
+ *         description: Search by city or area (case-insensitive)
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [APARTMENT, HOUSE, VILLA, CABIN]
+ *         description: Filter by property type
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *         description: Minimum price per night
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
+ *         description: Maximum price per night
+ *       - in: query
+ *         name: guests
+ *         schema:
+ *           type: integer
+ *         description: Minimum guest capacity
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of results per page
+ *     responses:
+ *       200:
+ *         description: A paginated list of listings
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Listing'
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                       example: 12
+ *                     page:
+ *                       type: integer
+ *                       example: 1
+ *                     limit:
+ *                       type: integer
+ *                       example: 10
+ *                     totalPages:
+ *                       type: integer
+ *                       example: 2
+ *       400:
+ *         description: Invalid query parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+router.get('/search', searchListings);
+
+router.get('/stats', getListingStatsByLocation);
 
 /**
  * @swagger

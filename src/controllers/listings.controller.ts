@@ -95,6 +95,79 @@ export const getAllListings = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * GET /listings/search
+ * Optimized search using database indexes (location, type, price).
+ */
+export const searchListings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const {
+      location,
+      type,
+      minPrice,
+      maxPrice,
+      guests,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const p = Number(page);
+    const l = Number(limit);
+    const skip = (p - 1) * l;
+
+    // Build conditional filters
+    const where: any = {};
+
+    if (location) {
+      where.location = { contains: String(location), mode: 'insensitive' };
+    }
+    if (type) {
+      where.type = String(type);
+    }
+    if (guests) {
+      where.guests = { gte: Number(guests) };
+    }
+    if (minPrice || maxPrice) {
+      where.pricePerNight = {
+        gte: minPrice ? Number(minPrice) : undefined,
+        lte: maxPrice ? Number(maxPrice) : undefined,
+      };
+    }
+
+    // Parallel Execution for speed
+    const [data, total] = await Promise.all([
+      prisma.listing.findMany({
+        where,
+        skip,
+        take: l,
+        include: {
+          host: {
+            select: { name: true, email: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.listing.count({ where }),
+    ]);
+
+    res.json({
+      data,
+      meta: {
+        total,
+        page: p,
+        limit: l,
+        totalPages: Math.ceil(total / l),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ---------------------------------------------------------------
 // GET /listings/:id
 // Returns one listing with its full host details and all bookings.
@@ -103,8 +176,15 @@ export const getListingById = async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params['id'] as string);
 
+    // Check if ID is a valid number to prevent further errors
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid listing ID' });
+    }
+
     const listing = await prisma.listing.findUnique({
-      where: { id },
+      where: {
+        id: id,
+      },
       include: {
         host: true, // full host object (name, email, avatar, etc.)
         bookings: {

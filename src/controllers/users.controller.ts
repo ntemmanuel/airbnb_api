@@ -32,7 +32,7 @@ import {
   updateUserSchema,
 } from '../validators/users.validator.js';
 import { handleControllerError } from '../controllers/bookings.controller.js';
-
+import bcrypt from 'bcrypt';
 
 // ---------------------------------------------------------------
 // GET /users
@@ -64,9 +64,13 @@ export const getAllUsers = async (req: Request, res: Response) => {
 // Useful for a "profile page" view.
 // ---------------------------------------------------------------
 // GET /users/:id
-export const getUserById = async (req: Request, res: Response, next: NextFunction) => {
+export const getUserById = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
-    const id = parseInt(req.params["id"] as string);
+    const id = parseInt(req.params['id'] as string);
 
     const user = await prisma.user.findUnique({
       where: { id },
@@ -74,22 +78,21 @@ export const getUserById = async (req: Request, res: Response, next: NextFunctio
         profile: true,
         // Instead of separate queries, use Prisma's conditional include logic:
         listings: {
-          include: { _count: { select: { bookings: true } } }
+          include: { _count: { select: { bookings: true } } },
         },
         bookings: {
-          include: { listing: { select: { title: true, location: true } } }
-        }
-      }
+          include: { listing: { select: { title: true, location: true } } },
+        },
+      },
     });
 
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
     res.status(200).json(user);
   } catch (error) {
     next(error); // This sends the raw error to your terminal for debugging
   }
 };
-
 
 // GET /users/:id/listings
 export const getListingsByHost = async (req: Request, res: Response) => {
@@ -124,11 +127,23 @@ export const createUser = async (req: Request, res: Response) => {
       return;
     }
 
+    // 1. Extract the raw password from validated data
+    const { password, ...otherData } = result.data;
+
+    // 2. Hash it (Prisma won't accept a missing or raw password if it's required)
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 3. Create the user with the hash
     const newUser = await prisma.user.create({
-      data: result.data,
+      data: {
+        ...otherData,
+        password: hashedPassword,
+      },
     });
 
-    res.status(201).json(newUser);
+    // 4. Strip the password before sending back to client
+    const { password: _, ...userWithoutPassword } = newUser;
+    res.status(201).json(userWithoutPassword);
   } catch (error) {
     handleControllerError(res, error, 'createUser');
   }

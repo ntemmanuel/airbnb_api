@@ -55,134 +55,143 @@ export const handleControllerError = (
   return res.status(500).json({ message: 'Something went wrong.' });
 };
 
-// ---------------------------------------------------------------
-// GET /bookings
-// Returns all bookings with guest name and listing title.
-// ---------------------------------------------------------------
-export const getAllBookings = async (req: Request, res: Response) => {
-  try {
-    const bookings = await prisma.booking.findMany({
-      include: {
-        guest: { select: { name: true } },
-        listing: { select: { title: true } },
-      },
-    });
-    res.status(200).json(bookings);
-  } catch (error) {
-    console.error('getAllBookings error:', error);
-    res.status(500).json({ message: 'Something went wrong.' });
-  }
-};
-
-// ---------------------------------------------------------------
-// GET /bookings/:id
-// Returns detailed info for one booking, guest, and listing.
-// ---------------------------------------------------------------
-export const getBookingById = async (req: Request, res: Response) => {
-  try {
-    const id = parseInt(req.params['id'] as string);
-
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-      include: {
-        guest: true, // Full guest profile
-        listing: {
-          include: {
-            host: { select: { name: true } }, // Show host name of the property
-          },
-        },
-      },
-    });
-
-    if (!booking) return res.status(404).json({ message: 'Booking not found' });
-    res.status(200).json(booking);
-  } catch (error) {
-    handleControllerError(res, error, 'getBookingById');
-  }
-};
-
-// POST /bookings
-export const createBooking = async (
-  req: AuthRequest,
+/**
+ * GET /bookings
+ * Optimized with Parallel fetching of data and total count.
+ */
+export const getAllBookings = async (
+  req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const { listingId, checkIn, checkOut } = req.body;
-    const guestId = req.userId!; // Derived from JWT, safe from tampering
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    // 1. Basic validation
-    if (!listingId || !checkIn || !checkOut) {
+    const [data, total] = await Promise.all([
+      prisma.booking.findMany({
+        skip,
+        take: limit,
+        include: {
+          user: { select: { name: true } },
+          listing: { select: { title: true, location: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.booking.count(),
+    ]);
+
+    res.json({
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /bookings/:id
+ */
+export const getBookingById = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const booking = await prisma.booking.findUnique({
+      where: { id: Number(req.params.id) },
+      include: { user: true, listing: true },
+    });
+
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    res.json(booking);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /users/:id/bookings
+ */
+export const getUserBookings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const userId = Number(req.params.id);
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const [data, total] = await Promise.all([
+      prisma.booking.findMany({
+        where: { guestId: userId },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { listing: { select: { title: true } } },
+      }),
+      prisma.booking.count({ where: { guestId: userId } }),
+    ]);
+
+    res.json({ data, meta: { total, page, limit } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /bookings
+ * Logic: Validates entities, calculates price server-side, and creates record.
+ */
+export const createBooking = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { userId, listingId, checkIn, checkOut, guests } = req.body;
+
+    // 1. Validation
+    if (!userId || !listingId || !checkIn || !checkOut || !guests) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const start = new Date(checkIn);
-    const end = new Date(checkOut);
-    const now = new Date();
+    // 2. Verify User and Listing exist
+    const [user, listing] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId } }),
+      prisma.listing.findUnique({ where: { id: listingId } }),
+    ]);
 
-    // 2. Date Logic Validation
-    if (start >= end) {
-      return res
-        .status(400)
-        .json({ error: 'Check-in must be before check-out' });
-    }
-    if (start < now) {
-      return res.status(400).json({ error: 'Check-in must be in the future' });
-    }
-
-    // 3. Verify Listing exists
-    const listing = await prisma.listing.findUnique({
-      where: { id: listingId },
-    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
     if (!listing) return res.status(404).json({ error: 'Listing not found' });
 
-    const diffInDays = Math.ceil(
+    // 3. Price Calculation
+    const start = new Date(checkIn);
+    const end = new Date(checkOut);
+    const nights = Math.ceil(
       (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
     );
-    const totalPrice = diffInDays * listing.pricePerNight;
+    const total = nights * listing.pricePerNight;
 
-    // 3. ATOMIC TRANSACTION
-    // We use 'tx' (the transaction client) for all DB calls inside this block
-    try {
-      const booking = await prisma.$transaction(async (tx) => {
-        // A. Check for conflicts inside the transaction
-        const conflict = await tx.booking.findFirst({
-          where: {
-            listingId,
-            status: 'CONFIRMED',
-            checkIn: { lt: end },
-            checkout: { gt: start },
-          },
-        });
+    // 4. Create
+    const booking = await prisma.booking.create({
+      data: {
+        guestId: userId,
+        listingId,
+        checkIn: start,
+        checkOut: end,
+        guests,
+        totalPrice: total,
+        status: 'PENDING',
+      },
+    });
 
-        if (conflict) {
-          // We throw a specific error string to catch it later
-          throw new Error('BOOKING_CONFLICT');
-        }
-
-        // B. Create the booking if no conflict
-        return await tx.booking.create({
-          data: {
-            listingId,
-            guestId: guestId!,
-            checkIn: start,
-            checkout: end,
-            totalPrice,
-            status: 'PENDING',
-          },
-        });
-      });
-
-      res.status(201).json(booking);
-    } catch (txError: any) {
-      // 4. Handle the specific conflict error
-      if (txError.message === 'BOOKING_CONFLICT') {
-        return res
-          .status(409)
-          .json({ error: 'This listing is already booked for these dates.' });
-      }
-      throw txError; // Pass other DB errors to the outer catch
-    }
+    res.status(201).json(booking);
   } catch (error) {
     next(error);
   }
@@ -213,54 +222,21 @@ export const updateBookingStatus = async (req: Request, res: Response) => {
   }
 };
 
-// DELETE /bookings/:id (Cancel)
+/**
+ * DELETE /bookings/:id
+ */
 export const deleteBooking = async (
-  req: AuthRequest,
+  req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = Number(req.params.id);
+    const exists = await prisma.booking.findUnique({ where: { id } });
+    if (!exists) return res.status(404).json({ error: 'Booking not found' });
 
-    // Find booking with relations for email data
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-      include: {
-        guest: { select: { name: true, email: true } },
-        listing: { select: { title: true } },
-      },
-    });
-
-    if (!booking) return res.status(404).json({ error: 'Booking not found' });
-    if (booking.guestId !== req.userId && req.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: { status: 'CANCELLED' },
-    });
-
-    res.json({ message: 'Booking cancelled successfully' });
-
-    // 2. Send Cancellation Email (Async/Background)
-    try {
-      const checkInStr = new Date(booking.checkIn).toLocaleDateString();
-      const checkOutStr = new Date(booking.checkout).toLocaleDateString();
-
-      await sendEmail(
-        booking.guest.email,
-        'Booking Cancelled',
-        bookingCancellationEmail(
-          booking.guest.name,
-          booking.listing.title,
-          checkInStr,
-          checkOutStr,
-        ),
-      );
-    } catch (emailErr) {
-      console.error('Failed to send cancellation email:', emailErr);
-    }
+    await prisma.booking.delete({ where: { id } });
+    res.json({ message: 'Booking deleted successfully' });
   } catch (error) {
     next(error);
   }
