@@ -13,7 +13,7 @@ export const uploadAvatar = async (
   next: NextFunction,
 ) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string;
 
     // 1. Ownership Check
     if (req.userId !== id) {
@@ -22,7 +22,7 @@ export const uploadAvatar = async (
         .json({ error: 'You can only update your own avatar' });
     }
 
-    // 2. Check if file exists (Multer puts it in req.file)
+    // 2. Check if file exists
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -30,15 +30,15 @@ export const uploadAvatar = async (
     const user = await prisma.user.findUnique({ where: { id } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // 3. Cleanup: Delete old avatar from Cloudinary if it exists
+    // 3. Cleanup old avatar
     if (user.avatarPublicId) {
       await deleteFromCloudinary(user.avatarPublicId);
     }
 
-    // 4. Upload new file to Cloudinary
+    // 4. Upload new avatar
     const result = await uploadToCloudinary(req.file.buffer, 'airbnb/avatars');
 
-    // 5. Update Database
+    // 5. Update DB
     const updatedUser = await prisma.user.update({
       where: { id },
       data: {
@@ -61,7 +61,7 @@ export const deleteAvatar = async (
   next: NextFunction,
 ) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string;
 
     if (req.userId !== id) {
       return res.status(403).json({ error: 'Unauthorized' });
@@ -72,10 +72,8 @@ export const deleteAvatar = async (
       return res.status(400).json({ error: 'No avatar to remove' });
     }
 
-    // Delete from Cloudinary
     await deleteFromCloudinary(user.avatarPublicId);
 
-    // Clear from Database
     await prisma.user.update({
       where: { id },
       data: {
@@ -97,19 +95,20 @@ export const uploadListingPhotos = async (
   next: NextFunction,
 ) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string;
     const files = req.files as Express.Multer.File[];
 
-    // 1. Find and Verify Listing Ownership
     const listing = await prisma.listing.findUnique({ where: { id } });
     if (!listing) return res.status(404).json({ error: 'Listing not found' });
-    if (listing.hostId !== req.userId)
-      return res.status(403).json({ error: 'Unauthorized' });
 
-    // 2. Enforce 5-Photo Limit
+    if (listing.hostId !== req.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
     const existingCount = await prisma.listingPhoto.count({
       where: { listingId: id },
     });
+
     if (existingCount >= 5) {
       return res
         .status(400)
@@ -120,24 +119,23 @@ export const uploadListingPhotos = async (
       return res.status(400).json({ error: 'No files uploaded' });
     }
 
-    // 3. Process Uploads (Only up to remaining slots)
     const limit = 5 - existingCount;
     const filesToUpload = files.slice(0, limit);
 
-    const uploadPromises = filesToUpload.map(async (file) => {
-      const result = await uploadToCloudinary(file.buffer, 'airbnb/listings');
-      return prisma.listingPhoto.create({
-        data: {
-          url: result.url,
-          publicId: result.publicId,
-          listingId: id,
-        },
-      });
-    });
+    await Promise.all(
+      filesToUpload.map(async (file) => {
+        const result = await uploadToCloudinary(file.buffer, 'airbnb/listings');
 
-    await Promise.all(uploadPromises);
+        return prisma.listingPhoto.create({
+          data: {
+            url: result.url,
+            publicId: result.publicId,
+            listingId: id,
+          },
+        });
+      }),
+    );
 
-    // 4. Return listing with fresh photos
     const updatedListing = await prisma.listing.findUnique({
       where: { id },
       include: { photos: true },
@@ -156,31 +154,40 @@ export const deleteListingPhoto = async (
   next: NextFunction,
 ) => {
   try {
-    const listingId = parseInt(req.params['id'] as string);
-    const photoId = parseInt(req.params['photoId'] as string);
+    const listingId = req.params['id'] as string;
+    const photoId = req.params['photoId'] as string;
 
     const listing = await prisma.listing.findUnique({
       where: { id: listingId },
     });
-    if (!listing) return res.status(404).json({ error: 'Listing not found' });
-    if (listing.hostId !== req.userId)
+
+    if (!listing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    if (listing.hostId !== req.userId) {
       return res.status(403).json({ error: 'Unauthorized' });
+    }
 
     const photo = await prisma.listingPhoto.findUnique({
       where: { id: photoId },
     });
-    if (!photo) return res.status(404).json({ error: 'Photo not found' });
 
-    // Security: Ensure photo actually belongs to this specific listing
+    if (!photo) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+
     if (photo.listingId !== listingId) {
       return res
         .status(403)
         .json({ error: 'Photo does not belong to this listing' });
     }
 
-    // Delete from Cloudinary and DB
     await deleteFromCloudinary(photo.publicId);
-    await prisma.listingPhoto.delete({ where: { id: photoId } });
+
+    await prisma.listingPhoto.delete({
+      where: { id: photoId },
+    });
 
     res.status(200).json({ message: 'Photo deleted successfully' });
   } catch (error) {

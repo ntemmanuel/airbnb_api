@@ -7,14 +7,13 @@
 
 import 'dotenv/config';
 import type { Request, Response, NextFunction } from 'express';
-// import * as jwt from 'jsonwebtoken';
-import * as jsonwebtoken from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 
 // 1. EXTEND THE REQUEST TYPE
 // By default, Express Request doesn't know about userId or role.
 // We extend it so we can carry this data through the app.
 export interface AuthRequest extends Request {
-  userId?: number;
+  userId?: string;
   role?: string;
 }
 
@@ -50,19 +49,10 @@ export const authenticate = (
       throw new Error('JWT_SECRET is missing in environment variables.');
     }
 
-    // console.log("Extracted Token:", token);
-    // FIX 2: Use unknown as a bridge to cast the payload
-    // const decoded = jwt.verify(token, secret) as unknown as {
-    //   userId: number;
-    //   role: string;
-    // };
-
-    // ... then use it like this:
-    const decoded = (jsonwebtoken.default as any).verify(token, secret);
-
-    req.userId = decoded.userId;
-    req.role = decoded.role;
-
+    const decoded = jwt.verify(token, secret) as {
+      userId: string;
+      role: string;
+    };
     next();
   } catch (err: any) {
     // catch (error) {

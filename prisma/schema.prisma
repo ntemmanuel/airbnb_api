@@ -1,29 +1,28 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  // url      = env("DATABASE_URL")
 }
 
 model User {
-  id               Int            @id @default(autoincrement())
+  id               String    @id @default(uuid()) // ✅ FIXED
   name             String
-  email            String         @unique
-  username         String         @unique
+  email            String    @unique
+  username         String    @unique
   phone            String
-  role             Role           @default(GUEST)
+  role             Role      @default(GUEST)
   password         String
   resetToken       String?
   resetTokenExpiry DateTime?
   avatar           String?
   avatarPublicId   String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
   profile          Profile?
-  listings         Listing[]      @relation("HostListings")
+  listings         Listing[] @relation("HostListings")
   bookings         Booking[]
   reviews          Review[]
 
@@ -38,16 +37,17 @@ enum Role {
 }
 
 model Profile {
-  id      Int     @id @default(autoincrement())
+  id      String  @id @default(uuid()) // ✅ FIXED (was missing @id)
   bio     String?
   website String?
   country String?
+
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId  Int     @unique
+  userId  String  @unique // ✅ FIXED (was Int)
 }
 
 model Listing {
-  id            Int            @id @default(autoincrement())
+  id            String    @id @default(uuid()) // already correct
   title         String
   description   String
   location      String
@@ -56,13 +56,12 @@ model Listing {
   type          ListingType
   amenities     String
   rating        Float?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  
-  // FIXED: Removed duplicate 'user' relation. Using 'host' consistently.
-  host          User           @relation("HostListings", fields: [hostId], references: [id], onDelete: Cascade)
-  hostId        Int
-  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  host          User      @relation("HostListings", fields: [hostId], references: [id], onDelete: Cascade)
+  hostId        String
+
   photos        ListingPhoto[]
   bookings      Booking[]
   reviews       Review[]
@@ -74,40 +73,43 @@ model Listing {
 }
 
 model ListingPhoto {
-  id        Int     @id @default(autoincrement())
+  id        String   @id @default(uuid()) // ✅ FIXED
   url       String
   publicId  String
+
   listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  listingId Int
+  listingId String  // ✅ FIXED
 }
 
 model Booking {
-  id         Int           @id @default(autoincrement())
+  id         String         @id @default(uuid()) // ✅ FIXED
   checkIn    DateTime
-  // FIXED: Using camelCase 'checkOut' to match your validators
   checkOut   DateTime
   totalPrice Float
   status     BookingStatus @default(CONFIRMED)
   createdAt  DateTime      @default(now())
 
-  // RELATIONS
-  guest      User          @relation(fields: [guestId], references: [id], onDelete: Restrict)
-  guestId    Int
-  listing    Listing       @relation(fields: [listingId], references: [id], onDelete: Restrict)
-  listingId  Int
+  guest      User    @relation(fields: [guestId], references: [id], onDelete: Restrict)
+  guestId    String  // ✅ FIXED
+
+  listing    Listing @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  listingId  String  // ✅ FIXED
 
   @@index([guestId])
   @@index([listingId])
 }
 
 model Review {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(uuid()) // ✅ FIXED
   rating    Int
   comment   String
-  userId    Int
-  listingId Int
+
+  userId    String   // ✅ FIXED
+  listingId String   // ✅ FIXED
+
   user      User     @relation(fields: [userId], references: [id])
   listing   Listing  @relation(fields: [listingId], references: [id])
+
   createdAt DateTime @default(now())
 
   @@index([userId])

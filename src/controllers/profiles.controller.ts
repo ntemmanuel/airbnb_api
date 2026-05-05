@@ -13,10 +13,16 @@ export const getProfile = async (
   next: NextFunction,
 ) => {
   try {
-    const userId = parseInt(req.params['id'] as string);
-    const profile = await prisma.profile.findUnique({ where: { userId } });
+    const userId = req.params['id'] as string;
 
-    if (!profile) return res.status(404).json({ message: 'Profile not found' });
+    const profile = await prisma.profile.findUnique({
+      where: { userId },
+    });
+
+    if (!profile) {
+      return res.status(404).json({ message: 'Profile not found' });
+    }
+
     res.status(200).json(profile);
   } catch (error) {
     next(error);
@@ -30,24 +36,31 @@ export const createProfile = async (
   next: NextFunction,
 ) => {
   try {
-    const userId = parseInt(req.params['id'] as string);
+    const userId = req.params['id'] as string;
     const validatedData = profileSchema.parse(req.body);
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
 
-    const existing = await prisma.profile.findUnique({ where: { userId } });
-    if (existing)
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const existing = await prisma.profile.findUnique({
+      where: { userId },
+    });
+
+    if (existing) {
       return res.status(409).json({ message: 'User already has a profile' });
+    }
 
-    // FIX: Map 'undefined' to 'null' for Prisma compatibility
     const profile = await prisma.profile.create({
       data: {
-        userId: userId,
+        userId,
         bio: validatedData.bio ?? null,
         website: validatedData.website ?? null,
         country: validatedData.country ?? null,
-        
       },
     });
 
@@ -64,13 +77,15 @@ export const updateProfile = async (
   next: NextFunction,
 ) => {
   try {
-    const userId = parseInt(req.params['id'] as string);
+    const userId = req.params['id'] as string;
     const validatedData = updateProfileSchema.parse(req.body);
 
     const updated = await prisma.profile.update({
       where: { userId },
       data: {
-        ...(validatedData.bio !== undefined && { bio: validatedData.bio }),
+        ...(validatedData.bio !== undefined && {
+          bio: validatedData.bio,
+        }),
         ...(validatedData.website !== undefined && {
           website: validatedData.website,
         }),
@@ -79,8 +94,9 @@ export const updateProfile = async (
         }),
       },
     });
+
+    return res.status(200).json(updated);
   } catch (error) {
-    // Global handler catches P2025 (Record not found) and converts to 404
     next(error);
   }
 };

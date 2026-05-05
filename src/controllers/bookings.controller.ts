@@ -8,7 +8,6 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import prisma from '../config/prisma.js';
-import { Prisma } from '../generated/prisma/client.js';
 import { createBookingSchema } from '../validators/bookings.validator.js';
 import type { AuthRequest } from '../middlewares/auth.middleware.js';
 import { sendEmail } from '../config/email.js';
@@ -18,42 +17,42 @@ import {
 } from '../templates/emails.js';
 
 // Utility to handle Prisma errors consistently
-export const handleControllerError = (
-  res: Response,
-  error: unknown,
-  operation: string,
-) => {
-  // 1. Log the error server-side for debugging
-  console.error(`❌ [${operation}] Failed:`, {
-    code:
-      error instanceof Prisma.PrismaClientKnownRequestError
-        ? error.code
-        : 'N/A',
-    message: error instanceof Error ? error.message : error,
-  });
+// export const handleControllerError = (
+//   res: Response,
+//   error: unknown,
+//   operation: string,
+// ) => {
+//   // 1. Log the error server-side for debugging
+//   console.error(`❌ [${operation}] Failed:`, {
+//     code:
+//       error instanceof Prisma.PrismaClientKnownRequestError
+//         ? error.code
+//         : 'N/A',
+//     message: error instanceof Error ? error.message : error,
+//   });
 
-  // 2. Check for specific Prisma errors
-  if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    switch (error.code) {
-      case 'P2002': // Unique constraint (e.g., duplicate email)
-        return res
-          .status(409)
-          .json({ message: 'A record with that unique field already exists.' });
-      case 'P2025': // Record not found
-        return res
-          .status(404)
-          .json({ message: 'The requested record was not found.' });
-      case 'P2003': // Foreign key constraint (e.g., invalid hostId)
-        return res.status(400).json({
-          message:
-            'Cannot delete this record because it is being used by other data (e.g., active bookings).',
-        });
-    }
-  }
+//   // 2. Check for specific Prisma errors
+//   if (error instanceof Prisma.PrismaClientKnownRequestError) {
+//     switch (error.code) {
+//       case 'P2002': // Unique constraint (e.g., duplicate email)
+//         return res
+//           .status(409)
+//           .json({ message: 'A record with that unique field already exists.' });
+//       case 'P2025': // Record not found
+//         return res
+//           .status(404)
+//           .json({ message: 'The requested record was not found.' });
+//       case 'P2003': // Foreign key constraint (e.g., invalid hostId)
+//         return res.status(400).json({
+//           message:
+//             'Cannot delete this record because it is being used by other data (e.g., active bookings).',
+//         });
+//     }
+//   }
 
-  // 3. Fallback for all other errors
-  return res.status(500).json({ message: 'Something went wrong.' });
-};
+//   // 3. Fallback for all other errors
+//   return res.status(500).json({ message: 'Something went wrong.' });
+// };
 
 const bookingInclude = {
   guest: { select: { id: true, name: true, email: true, username: true } },
@@ -91,14 +90,13 @@ export const getAllBookings = async (
         skip,
         take: limit,
         include: {
-          user: { select: { name: true } },
+          guest: { select: { name: true } }, // ✅ FIXED (was user)
           listing: { select: { title: true, location: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.booking.count(),
     ]);
-
     res.json({
       data,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
@@ -113,9 +111,9 @@ export const getAllBookings = async (
  */
 export const getBookingById = async (req: AuthRequest, res: Response) => {
   try {
-    const id = Number(req.params.id);
+    const id = req.params.id as string;
 
-    if (!id || isNaN(id)) {
+    if (!id) {
       return res.status(400).json({ error: 'Invalid booking ID' });
     }
 
@@ -123,7 +121,6 @@ export const getBookingById = async (req: AuthRequest, res: Response) => {
       where: { id },
       include: {
         guest: {
-          // ✅ FIXED
           select: {
             id: true,
             name: true,
@@ -139,7 +136,6 @@ export const getBookingById = async (req: AuthRequest, res: Response) => {
         },
       },
     });
-
     if (!booking) {
       return res.status(404).json({ error: 'Booking not found' });
     }
@@ -159,7 +155,7 @@ export const getBookingById = async (req: AuthRequest, res: Response) => {
 
     res.status(200).json(booking);
   } catch (error) {
-    return handleControllerError(res, error, 'Get Booking By ID');
+    return error;
   }
 };
 
@@ -172,7 +168,7 @@ export const getUserBookings = async (
   next: NextFunction,
 ) => {
   try {
-    const userId = Number(req.params.id);
+    const userId = req.params.id as string;
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
 
@@ -454,12 +450,13 @@ export const createBooking = async (
       });
     }
 
-    return handleControllerError(res, error, 'Create Booking');
+    // return handleControllerError(res, error, 'Create Booking');
+    next(error);
   }
 };
 export const updateBookingStatus = async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string;
     const { status } = req.body;
 
     // Basic validation (Prisma will also throw error if status isn't in Enum)
@@ -490,7 +487,7 @@ export const deleteBooking = async (
   next: NextFunction,
 ) => {
   try {
-    const id = Number(req.params.id);
+    const id = req.params.id as string;
     const exists = await prisma.booking.findUnique({ where: { id } });
     if (!exists) return res.status(404).json({ error: 'Booking not found' });
 

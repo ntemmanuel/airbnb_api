@@ -25,13 +25,12 @@
 // =============================================================
 
 import type { NextFunction, Request, Response } from 'express';
-import { Prisma } from '../generated/prisma/client.js';
 import prisma from '../config/prisma.js';
 import {
   createUserSchema,
   updateUserSchema,
 } from '../validators/users.validator.js';
-import { handleControllerError } from '../controllers/bookings.controller.js';
+// import { handleControllerError } from '../controllers/bookings.controller.js';
 import bcrypt from 'bcrypt';
 
 // ---------------------------------------------------------------
@@ -70,45 +69,76 @@ export const getUserById = async (
   next: NextFunction,
 ) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string; // ✅ FIXED
+
+    if (!id) {
+      return res.status(400).json({ message: 'Invalid user ID' });
+    }
 
     const user = await prisma.user.findUnique({
       where: { id },
       include: {
         profile: true,
-        // Instead of separate queries, use Prisma's conditional include logic:
         listings: {
           include: { _count: { select: { bookings: true } } },
         },
         bookings: {
-          include: { listing: { select: { title: true, location: true } } },
+          include: {
+            listing: { select: { title: true, location: true } },
+          },
         },
       },
     });
 
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
 
     res.status(200).json(user);
   } catch (error) {
-    next(error); // This sends the raw error to your terminal for debugging
+    next(error);
   }
 };
 
 // GET /users/:id/listings
 export const getListingsByHost = async (req: Request, res: Response) => {
-  const id = parseInt(req.params['id'] as string);
-  const listings = await prisma.listing.findMany({ where: { hostId: id } });
-  res.status(200).json(listings);
+  try {
+    const id = req.params['id'] as string; // ✅ FIXED
+
+    if (!id) {
+      return res.status(400).json({ message: 'Invalid user ID' });
+    }
+
+    const listings = await prisma.listing.findMany({
+      where: { hostId: id }, // ✅ string FK
+    });
+
+    res.status(200).json(listings);
+  } catch (error) {
+    console.error('getListingsByHost error:', error);
+    res.status(500).json({ message: 'Something went wrong.' });
+  }
 };
 
 // GET /users/:id/bookings
 export const getBookingsByGuest = async (req: Request, res: Response) => {
-  const id = parseInt(req.params['id'] as string);
-  const bookings = await prisma.booking.findMany({
-    where: { guestId: id },
-    include: { listing: true },
-  });
-  res.status(200).json(bookings);
+  try {
+    const id = req.params['id'] as string; // ✅ FIXED
+
+    if (!id) {
+      return res.status(400).json({ message: 'Invalid user ID' });
+    }
+
+    const bookings = await prisma.booking.findMany({
+      where: { guestId: id }, // ✅ string FK
+      include: { listing: true },
+    });
+
+    res.status(200).json(bookings);
+  } catch (error) {
+    console.error('getBookingsByGuest error:', error);
+    res.status(500).json({ message: 'Something went wrong.' });
+  }
 };
 
 // ---------------------------------------------------------------
@@ -145,7 +175,8 @@ export const createUser = async (req: Request, res: Response) => {
     const { password: _, ...userWithoutPassword } = newUser;
     res.status(201).json(userWithoutPassword);
   } catch (error) {
-    handleControllerError(res, error, 'createUser');
+    // handleControllerError(res, error, 'createUser');
+    return error;
   }
 };
 
@@ -155,15 +186,19 @@ export const createUser = async (req: Request, res: Response) => {
 // ---------------------------------------------------------------
 export const updateUser = async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string; // ✅ FIXED
+
+    if (!id) {
+      return res.status(400).json({ message: 'Invalid user ID' });
+    }
+
     const result = updateUserSchema.safeParse(req.body);
 
     if (!result.success) {
-      res.status(400).json({
+      return res.status(400).json({
         message: 'Validation failed',
         errors: result.error.flatten().fieldErrors,
       });
-      return;
     }
 
     const updated = await prisma.user.update({
@@ -173,7 +208,8 @@ export const updateUser = async (req: Request, res: Response) => {
 
     res.status(200).json(updated);
   } catch (error) {
-    handleControllerError(res, error, 'updateUser');
+    // handleControllerError(res, error, 'updateUser');
+    return error;
   }
 };
 
@@ -185,20 +221,23 @@ export const updateUser = async (req: Request, res: Response) => {
 // ---------------------------------------------------------------
 export const deleteUser = async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string; // ✅ FIXED
 
-    const existing = await prisma.user.findFirst({ where: { id } });
+    if (!id) {
+      return res.status(400).json({ message: 'Invalid user ID' });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { id } });
 
     if (!existing) {
-      res.status(404).json({ message: `User with id ${id} not found.` });
-      return;
+      return res.status(404).json({ message: `User not found.` });
     }
 
     await prisma.user.delete({ where: { id } });
 
-    res
-      .status(200)
-      .json({ message: `User with id ${id} deleted successfully.` });
+    res.status(200).json({
+      message: `User deleted successfully.`,
+    });
   } catch (error) {
     console.error('deleteUser error:', error);
     res.status(500).json({ message: 'Something went wrong.' });

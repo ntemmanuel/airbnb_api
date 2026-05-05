@@ -1,0 +1,1 @@
+{"version":3,"file":"deprecation.middleware.js","sourceRoot":"","sources":["deprecation.middleware.ts"],"names":[],"mappings":"AAEA,MAAM,UAAU,WAAW,CAAC,GAAY,EAAE,GAAa,EAAE,IAAkB;IACzE,GAAG,CAAC,SAAS,CAAC,aAAa,EAAE,MAAM,CAAC,CAAC;IACrC,GAAG,CAAC,SAAS,CAAC,QAAQ,EAAE,+BAA+B,CAAC,CAAC;IACzD,GAAG,CAAC,SAAS,CAAC,MAAM,EAAE,oCAAoC,CAAC,CAAC;IAC5D,IAAI,EAAE,CAAC;AACT,CAAC"}

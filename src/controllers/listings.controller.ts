@@ -26,7 +26,7 @@ import {
   updateListingSchema,
 } from '../validators/listings.validator.js';
 import prisma from '../config/prisma.js';
-import { handleControllerError } from '../controllers/bookings.controller.js';
+// import { handleControllerError } from '../controllers/bookings.controller.js';
 import type { AuthRequest } from '../middlewares/auth.middleware.js';
 
 // ---------------------------------------------------------------
@@ -91,7 +91,8 @@ export const getAllListings = async (req: Request, res: Response) => {
 
     res.status(200).json(listings);
   } catch (error) {
-    handleControllerError(res, error, 'getAllListings');
+    // handleControllerError(res, error, 'getAllListings');
+    return error;
   }
 };
 
@@ -174,19 +175,16 @@ export const searchListings = async (
 // ---------------------------------------------------------------
 export const getListingById = async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string; // ✅ FIXED
 
-    // Check if ID is a valid number to prevent further errors
-    if (isNaN(id)) {
+    if (!id) {
       return res.status(400).json({ error: 'Invalid listing ID' });
     }
 
     const listing = await prisma.listing.findUnique({
-      where: {
-        id: id,
-      },
+      where: { id }, // ✅ string UUID
       include: {
-        host: true, // full host object (name, email, avatar, etc.)
+        host: true,
         bookings: {
           include: {
             guest: { select: { name: true, avatar: true } },
@@ -196,8 +194,7 @@ export const getListingById = async (req: Request, res: Response) => {
     });
 
     if (!listing) {
-      res.status(404).json({ message: `Listing with id ${id} not found.` });
-      return;
+      return res.status(404).json({ message: `Listing not found.` });
     }
 
     res.status(200).json(listing);
@@ -265,21 +262,23 @@ export async function updateListing(
   next: NextFunction,
 ) {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string; // ✅ FIXED
+
     const listing = await prisma.listing.findUnique({ where: { id } });
 
-    if (!listing) return res.status(404).json({ error: 'Listing not found' });
+    if (!listing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
 
-    // OWNERSHIP CHECK: Only the host or an ADMIN can update
     if (listing.hostId !== req.userId && req.role !== 'ADMIN') {
-      return res
-        .status(403)
-        .json({ error: 'You can only edit your own listings' });
+      return res.status(403).json({
+        error: 'You can only edit your own listings',
+      });
     }
 
     const updated = await prisma.listing.update({
       where: { id },
-      data: req.body, // Use Zod validation here as we did in previous steps
+      data: req.body,
     });
 
     res.json(updated);
@@ -295,19 +294,22 @@ export async function deleteListing(
   next: NextFunction,
 ) {
   try {
-    const id = parseInt(req.params['id'] as string);
+    const id = req.params['id'] as string; // ✅ FIXED
+
     const listing = await prisma.listing.findUnique({ where: { id } });
 
-    if (!listing) return res.status(404).json({ error: 'Listing not found' });
+    if (!listing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
 
-    // OWNERSHIP CHECK: Only the host or an ADMIN can delete
     if (listing.hostId !== req.userId && req.role !== 'ADMIN') {
-      return res
-        .status(403)
-        .json({ error: 'You can only delete your own listings' });
+      return res.status(403).json({
+        error: 'You can only delete your own listings',
+      });
     }
 
     await prisma.listing.delete({ where: { id } });
+
     res.json({ message: 'Listing deleted successfully' });
   } catch (error) {
     next(error);
@@ -321,16 +323,20 @@ export async function deleteListing(
 // ---------------------------------------------------------------
 export const getListingsByHost = async (req: Request, res: Response) => {
   try {
-    const hostId = parseInt(req.params['id'] as string);
+    const hostId = req.params['id'] as string; // ✅ FIXED
 
-    const host = await prisma.user.findFirst({ where: { id: hostId } });
+    if (!hostId) {
+      return res.status(400).json({ message: 'Invalid host ID' });
+    }
+
+    const host = await prisma.user.findUnique({ where: { id: hostId } });
+
     if (!host) {
-      res.status(404).json({ message: `User with id ${hostId} not found.` });
-      return;
+      return res.status(404).json({ message: `User not found.` });
     }
 
     const listings = await prisma.listing.findMany({
-      where: { hostId }, // SQL: WHERE hostId = X
+      where: { hostId }, // ✅ string
     });
 
     res.status(200).json(listings);

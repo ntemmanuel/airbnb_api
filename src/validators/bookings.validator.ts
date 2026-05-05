@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const createBookingSchema = z
   .object({
-    listingId: z.number().int().positive(),
+    listingId: z.string().uuid(),
     checkIn: z.string().datetime('Invalid checkIn date'),
     checkOut: z.string().datetime('Invalid checkOut date'),
   })

@@ -1,88 +1,102 @@
 // =============================================================
 // FILE: src/index.ts
-// -------------------------------------------------------------
-// RESPONSIBILITY: This is the ENTRY POINT of the entire app.
-//   It's the first file that runs when you do "npm run dev".
-//   Its job is to:
-//     1. Initialize environment variables
-//     2. Create the Express application
-//     3. Apply global middleware (e.g. JSON body parsing)
-//     4. Mount (register) all routers at their base URL paths
-//     5. Connect to the Database
-//     6. Start the HTTP server and listen for incoming requests
 // =============================================================
 
-// 1. LOAD ENVIRONMENT VARIABLES FIRST
-// This must be the absolute first thing that happens so all
-// following code can access variables from your .env file.
 import 'dotenv/config';
 import express from 'express';
-import type { Request, Response } from 'express';
-// Import the two routers we built.
-import usersRouter from './routes/users.routes.js';
-import listingsRouter from './routes/listings.routes.js';
-import bookingRouter from './routes/bookings.routes.js';
-import { errorHandler } from './middlewares/errorHandler.js';
-import authRouter from './routes/auth.routes.js';
-import { setupSwagger } from './config/swagger.js';
-// Import the database connection utility (assumed path)
-import { connectDB } from './config/prisma.js';
+import type { Request, Response, NextFunction } from 'express';
+import compression from 'compression';
 
-import uploadRouter from './routes/upload.routes.js';
+import { setupSwagger } from './config/swagger.js';
+import { connectDB } from './config/prisma.js';
 import { generalLimiter, strictLimiter } from './middlewares/rateLimiter.js';
-import compression from "compression";
+
+// v1 routers
+import usersRouter from './routes/v1/users.routes.js';
+import listingsRouter from './routes/v1/listings.routes.js';
+import bookingRouter from './routes/v1/bookings.routes.js';
+import authRouter from './routes/v1/auth.routes.js';
+import uploadRouter from './routes/v1/upload.routes.js';
+import morgan from "morgan";
+
+
 
 const app = express();
+app.use(process.env["NODE_ENV"] === "production" ? morgan("combined") : morgan("dev"));
 
+// =============================================================
+// GLOBAL MIDDLEWARE
+// =============================================================
 app.use(compression());
 app.use(express.json());
-
-// 2. GLOBAL MIDDLEWARE
-app.use(express.json());
-
-// Initialize Swagger Documentation
-setupSwagger(app);
-
-// Apply general limiter to EVERY request
 app.use(generalLimiter);
 
-// ... route definitions
-app.use('/auth', strictLimiter, authRouter);
+// Swagger
+setupSwagger(app);
 
-// 3. MOUNT ROUTERS
-app.use('/users', usersRouter);
-app.use('/listings', listingsRouter);
-app.use('/bookings', strictLimiter, bookingRouter);
-// This makes sure POST /register becomes POST /auth/register
-app.use('/auth', strictLimiter, authRouter);
-app.use(errorHandler);
-// Mount the upload routes under the /users path
-app.use('/users', uploadRouter);
+// =============================================================
+// HEALTH CHECK
+// =============================================================
+app.get('/health', (req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: new Date(),
+  });
+});
 
-// 4. CATCH-ALL 404 HANDLER
+// =============================================================
+// API VERSION PREFIX
+// =============================================================
+const API_V1 = '/api/v1';
+
+// =============================================================
+// ROUTES
+// =============================================================
+app.use(`${API_V1}/auth`, strictLimiter, authRouter);
+app.use(`${API_V1}/users`, usersRouter);
+app.use(`${API_V1}/listings`, listingsRouter);
+app.use(`${API_V1}/bookings`, strictLimiter, bookingRouter);
+app.use(`${API_V1}/upload`, uploadRouter);
+
+// =============================================================
+// 404 HANDLER (ONLY ONE)
+// =============================================================
 app.use((req: Request, res: Response) => {
   res.status(404).json({
     message: `Route ${req.method} ${req.originalUrl} not found.`,
   });
 });
 
-// 5. STARTUP WRAPPER
-// We use an async main function so we can wait for the database
-// to connect successfully before we let users talk to our API.
+// =============================================================
+// ERROR HANDLER (ONLY ONE)
+// =============================================================
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  console.error('🔥 Error:', err.message);
+  console.error(err.stack);
+
+  res.status(500).json({
+    error: 'Something went wrong',
+  });
+});
+
+// =============================================================
+// START SERVER
+// =============================================================
 async function main() {
   try {
-    // Await the database connection
     await connectDB();
     console.log('✅ Database connected successfully');
 
-    // Get PORT from environment or use 3000 as a backup
-    const PORT = process.env['PORT'] || 3000;
+    const PORT = Number(process.env.PORT) || 3000;
 
     app.listen(PORT, () => {
-      console.log(`✅ Server is running at http://localhost:${PORT}`);
-      console.log(`   Users    → http://localhost:${PORT}/users`);
-      console.log(`   Listings → http://localhost:${PORT}/listings`);
-      console.log(`   Bookings → http://localhost:${PORT}/bookings`);
+      console.log(`✅ Server running: http://localhost:${PORT}`);
+      console.log(`📘 API Base: http://localhost:${PORT}/api/v1`);
+      console.log(`   Auth     → /api/v1/auth`);
+      console.log(`   Users    → /api/v1/users`);
+      console.log(`   Listings → /api/v1/listings`);
+      console.log(`   Bookings → /api/v1/bookings`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
