@@ -83,11 +83,12 @@ export async function register(
     // We wrap this in a separate try/catch so an email failure
     // doesn't trigger the global error handler after the response is sent.
     try {
-      await sendEmail(
-        user.email,
-        'Welcome to Airbnb!',
-        welcomeEmail(user.name, user.role),
-      );
+      await sendEmail({
+        to: user.email,
+        subject: 'Welcome to Airbnb!',
+        html: welcomeEmail(user.name, user.role),
+      });
+
       console.log(`✅ Welcome email sent to ${user.email}`);
     } catch (emailError) {
       // Log the error for the dev, but the user is already registered successfully
@@ -299,11 +300,11 @@ export async function forgotPassword(
 
     // 6. Fire Reset Email in Background
     try {
-      await sendEmail(
-        user.email,
-        'Password Reset Request',
-        passwordResetEmail(user.name, resetUrl),
-      );
+      await sendEmail({
+        to: user.email,
+        subject: 'Password Reset Request',
+        html: passwordResetEmail(user.name, resetUrl),
+      });
       console.log(`✅ Reset email delivered to ${user.email}`);
     } catch (emailError) {
       console.error('❌ Failed to send password reset email:', emailError);

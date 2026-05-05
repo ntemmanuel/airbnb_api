@@ -33,30 +33,57 @@ export const welcomeEmail = (name: string, role: string): string => {
 /**
  * 2. Booking Confirmation Email Template
  */
-export const bookingConfirmationEmail = (
-  guestName: string,
-  listingTitle: string,
-  location: string,
-  checkIn: string,
-  checkOut: string,
-  totalPrice: number,
-): string => {
-  return `
-    <div style="font-family: sans-serif; color: #333; max-width: 600px;">
-      <h1 style="color: ${BRAND_COLOR}">Your trip is confirmed!</h1>
-      <p>Hi ${guestName}, get ready for your stay at <strong>${listingTitle}</strong>.</p>
-      <div style="background-color: #f7f7f7; padding: 20px; border-radius: 12px; margin: 20px 0;">
-        <p><strong>Location:</strong> ${location}</p>
-        <p><strong>Check-in:</strong> ${checkIn}</p>
-        <p><strong>Check-out:</strong> ${checkOut}</p>
-        <p><strong>Total Price:</strong> $${totalPrice.toFixed(2)}</p>
-      </div>
-      <p style="font-size: 12px; color: #666;">
-        <em>Cancellation Policy:</em> Bookings are subject to host approval. Please review the house rules before arrival.
-      </p>
-    </div>
-  `;
+// export const bookingConfirmationEmail = (
+//   guestName: string,
+//   listingTitle: string,
+//   location: string,
+//   checkIn: string,
+//   checkOut: string,
+//   totalPrice: number,
+// ): string => {
+//   return `
+//     <div style="font-family: sans-serif; color: #333; max-width: 600px;">
+//       <h1 style="color: ${BRAND_COLOR}">Your trip is confirmed!</h1>
+//       <p>Hi ${guestName}, get ready for your stay at <strong>${listingTitle}</strong>.</p>
+//       <div style="background-color: #f7f7f7; padding: 20px; border-radius: 12px; margin: 20px 0;">
+//         <p><strong>Location:</strong> ${location}</p>
+//         <p><strong>Check-in:</strong> ${checkIn}</p>
+//         <p><strong>Check-out:</strong> ${checkOut}</p>
+//         <p><strong>Total Price:</strong> $${totalPrice.toFixed(2)}</p>
+//       </div>
+//       <p style="font-size: 12px; color: #666;">
+//         <em>Cancellation Policy:</em> Bookings are subject to host approval. Please review the house rules before arrival.
+//       </p>
+//     </div>
+//   `;
+// };
+
+type BookingEmailParams = {
+  guestName: string;
+  listingTitle: string;
+  location: string;
+  checkIn: string;
+  checkOut: string;
+  totalPrice: number;
 };
+
+export function bookingConfirmationEmail({
+  guestName,
+  listingTitle,
+  location,
+  checkIn,
+  checkOut,
+  totalPrice,
+}: BookingEmailParams): string {
+  return `
+    <h1>Booking Confirmed 🎉</h1>
+    <p>Hello ${guestName},</p>
+    <p>Your booking at <strong>${listingTitle}</strong> (${location}) is confirmed.</p>
+    <p>Check-in: ${checkIn}</p>
+    <p>Check-out: ${checkOut}</p>
+    <p>Total: $${totalPrice}</p>
+  `;
+}
 
 /**
  * 3. Booking Cancellation Email Template
