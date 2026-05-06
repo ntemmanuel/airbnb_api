@@ -17,6 +17,10 @@ const options: swaggerJsdoc.Options = {
         url: 'http://localhost:3000/api/v1',
         description: 'Local server (v1)',
       },
+      {
+        url:'https://airbnb-api-j34t.onrender.com/api/v1',
+        description:'production server'
+      }
     ],
 
     components: {
